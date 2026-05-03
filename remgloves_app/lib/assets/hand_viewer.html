@@ -4,89 +4,147 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <style>
-    * { margin: 0; padding: 0; }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
     html, body { width: 100%; height: 100%; overflow: hidden; background: #1a1a2e; }
     canvas { display: block; }
+
+    /* ── View nav bar (bottom-centre) ───────────────────────────────── */
+    #cam-nav {
+      position: fixed; bottom: 10px; left: 50%;
+      transform: translateX(-50%);
+      display: flex; gap: 5px; z-index: 999;
+    }
+    #cam-nav button {
+      background: rgba(15,15,38,0.82);
+      color: #ccd4ee;
+      border: 1px solid rgba(255,255,255,0.14);
+      border-radius: 7px;
+      padding: 6px 10px;
+      font: 600 11px/1 sans-serif;
+      cursor: pointer;
+      -webkit-tap-highlight-color: transparent;
+      user-select: none;
+    }
+    #cam-nav button.reset-btn {
+      color: #f5a623;
+      border-color: rgba(245,166,35,0.30);
+    }
+
+    /* ── Zoom buttons (right-centre) ────────────────────────────────── */
+    #zoom-ctrl {
+      position: fixed; right: 10px; top: 50%;
+      transform: translateY(-50%);
+      display: flex; flex-direction: column; gap: 6px; z-index: 999;
+    }
+    #zoom-ctrl button {
+      width: 38px; height: 38px;
+      background: rgba(15,15,38,0.82);
+      color: #ccd4ee;
+      border: 1px solid rgba(255,255,255,0.14);
+      border-radius: 50%;
+      font: bold 20px/1 sans-serif;
+      line-height: 38px; text-align: center;
+      cursor: pointer;
+      -webkit-tap-highlight-color: transparent;
+      user-select: none;
+    }
+
+    /* ── Brief usage hint ───────────────────────────────────────────── */
+    #hint {
+      position: fixed; top: 8px; left: 50%;
+      transform: translateX(-50%);
+      background: rgba(0,0,0,0.40);
+      color: rgba(220,230,255,0.65);
+      font: 11px/1.5 sans-serif;
+      padding: 4px 12px; border-radius: 20px;
+      pointer-events: none;
+      transition: opacity .5s;
+      white-space: nowrap;
+    }
   </style>
 </head>
 <body>
+
+  <div id="hint">Drag to orbit · Pinch or ±  to zoom</div>
+
+  <!-- Zoom controls -->
+  <div id="zoom-ctrl">
+    <button id="btn-zoom-in"  title="Zoom in">+</button>
+    <button id="btn-zoom-out" title="Zoom out">−</button>
+  </div>
+
+  <!-- View preset nav -->
+  <div id="cam-nav"></div>
+
   <script src="threejs/three.min.js"></script>
   <script src="threejs/GLTFLoader.js"></script>
   <script src="threejs/OrbitControls.js"></script>
   <script>
-    // ── Renderer ─────────────────────────────────────────────────────────
-    var renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+    // ── Renderer ──────────────────────────────────────────────────────────
+    var renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
     renderer.setSize(innerWidth, innerHeight);
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type    = THREE.PCFSoftShadowMap;
     renderer.outputEncoding    = THREE.sRGBEncoding;
     renderer.toneMapping       = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.2;
+    renderer.toneMappingExposure = 1.15;
     document.body.appendChild(renderer.domElement);
 
     // ── Scene ─────────────────────────────────────────────────────────────
     var scene = new THREE.Scene();
     scene.background = new THREE.Color(0x1a1a2e);
-    scene.fog = new THREE.Fog(0x1a1a2e, 4, 10);
 
     // ── Camera ────────────────────────────────────────────────────────────
-    var camera = new THREE.PerspectiveCamera(42, innerWidth / innerHeight, 0.01, 50);
-    camera.position.set(0.4, 0.25, 1.9);
+    var camera = new THREE.PerspectiveCamera(55, innerWidth / innerHeight, 0.01, 50);
+    camera.position.set(0, 0, 3);
 
     // ── Lighting ──────────────────────────────────────────────────────────
-    // Soft ambient
-    scene.add(new THREE.AmbientLight(0x8090a0, 0.7));
-
-    // Key light (warm, from upper-right-front)
-    var key = new THREE.DirectionalLight(0xfff0e0, 1.6);
+    scene.add(new THREE.AmbientLight(0x8090b0, 0.75));
+    var key = new THREE.DirectionalLight(0xfff0e0, 1.5);
     key.position.set(1.5, 3, 2);
     key.castShadow = true;
     key.shadow.mapSize.set(1024, 1024);
     key.shadow.camera.near = 0.5;
-    key.shadow.camera.far  = 10;
-    key.shadow.bias        = -0.001;
+    key.shadow.camera.far  = 15;
+    key.shadow.bias = -0.001;
     scene.add(key);
-
-    // Fill light (cool, from left)
-    var fill = new THREE.DirectionalLight(0xa0c0ff, 0.5);
+    var fill = new THREE.DirectionalLight(0xa0c0ff, 0.45);
     fill.position.set(-2, 1, 1);
     scene.add(fill);
-
-    // Accent / rim light (warm orange — matches app primary colour)
-    var rim = new THREE.DirectionalLight(0xf5a623, 0.4);
+    var rim = new THREE.DirectionalLight(0xf5a623, 0.35);
     rim.position.set(0, -1, -2);
     scene.add(rim);
 
     // ── Floor shadow catcher ──────────────────────────────────────────────
-    var floorGeo = new THREE.PlaneGeometry(4, 4);
-    var floorMat = new THREE.ShadowMaterial({ opacity: 0.25 });
-    var floor = new THREE.Mesh(floorGeo, floorMat);
-    floor.rotation.x = -Math.PI / 2;
-    floor.position.y = -0.85;
+    var floor = new THREE.Mesh(
+      new THREE.PlaneGeometry(6, 6),
+      new THREE.ShadowMaterial({ opacity: 0.20 })
+    );
+    floor.rotation.x   = -Math.PI / 2;
+    floor.position.y   = -1;
     floor.receiveShadow = true;
     scene.add(floor);
 
     // ── Orbit controls ────────────────────────────────────────────────────
     var controls = new THREE.OrbitControls(camera, renderer.domElement);
-    controls.target.set(0, 0.05, 0);
-    controls.enableDamping    = true;
-    controls.dampingFactor    = 0.08;
-    controls.enablePan        = false;
-    controls.minDistance      = 0.6;
-    controls.maxDistance      = 3.5;
-    controls.minPolarAngle    = Math.PI * 0.1;  // don't go below floor
-    controls.maxPolarAngle    = Math.PI * 0.85;
-    controls.autoRotate       = true;           // slow spin until user touches
-    controls.autoRotateSpeed  = 1.2;
+    controls.enableDamping   = true;
+    controls.dampingFactor   = 0.08;
+    controls.enablePan       = true;
+    controls.panSpeed        = 0.5;
+    controls.minDistance     = 0.3;
+    controls.maxDistance     = 8;
+    controls.minPolarAngle   = Math.PI * 0.04;
+    controls.maxPolarAngle   = Math.PI * 0.92;
+    controls.autoRotate      = true;
+    controls.autoRotateSpeed = 1.0;
     controls.update();
 
-    // Stop auto-rotate on first user interaction
     renderer.domElement.addEventListener('pointerdown', function () {
       controls.autoRotate = false;
     }, { once: true });
 
-    // ── Finger → bone-name prefixes ───────────────────────────────────────
+    // ── Finger bone prefixes ──────────────────────────────────────────────
     var fingerPrefixes = {
       thumb:  ['thumb'],
       index:  ['index', 'hand.R.001'],
@@ -94,84 +152,173 @@
       ring:   ['ring'],
       pinky:  ['pinky']
     };
-
-    var mixer         = null;
-    var fingerActions = {};
+    var mixer = null, fingerActions = {};
 
     function buildFingerActions(clip) {
       Object.keys(fingerPrefixes).forEach(function (finger) {
-        var prefixes = fingerPrefixes[finger];
         var tracks = clip.tracks.filter(function (t) {
-          return prefixes.some(function (p) { return t.name.startsWith(p); });
+          return fingerPrefixes[finger].some(function (p) { return t.name.startsWith(p); });
         });
-        if (tracks.length === 0) return;
-        var sub    = new THREE.AnimationClip(finger, clip.duration, tracks);
-        var action = mixer.clipAction(sub);
-        action.play();
-        action.paused = true;
-        action.time   = 0;
+        if (!tracks.length) return;
+        var action = mixer.clipAction(new THREE.AnimationClip(finger, clip.duration, tracks));
+        action.play(); action.paused = true; action.time = 0;
         fingerActions[finger] = { action: action, duration: clip.duration };
       });
     }
 
+    // ── Auto-fit: positions camera so the whole model is visible ──────────
+    var _fitDist = 2.5;
+    var _modelCenter = new THREE.Vector3();
+
+    function fitCamera(object) {
+      var box    = new THREE.Box3().setFromObject(object);
+      var sphere = box.getBoundingSphere(new THREE.Sphere());
+      _modelCenter.copy(sphere.center);
+      var r      = sphere.radius;
+      var fovRad = (camera.fov * Math.PI) / 180;
+      _fitDist   = (r / Math.sin(fovRad / 2)) * 1.2;
+
+      camera.position.set(_fitDist * 0.15, _fitDist * 0.35, _fitDist);
+      controls.target.copy(_modelCenter);
+      controls.minDistance = r * 0.3;
+      controls.maxDistance = r * 7;
+      controls.update();
+
+      floor.position.y = box.min.y - 0.01;
+    }
+
+    // ── GLTF loaded ───────────────────────────────────────────────────────
     function onGLTFLoaded(gltf) {
-      // Centre the model
       var box    = new THREE.Box3().setFromObject(gltf.scene);
       var centre = box.getCenter(new THREE.Vector3());
       gltf.scene.position.sub(centre);
-
-      // Enable shadows on every mesh
-      gltf.scene.traverse(function (node) {
-        if (node.isMesh) {
-          node.castShadow    = true;
-          node.receiveShadow = true;
-        }
+      gltf.scene.traverse(function (n) {
+        if (n.isMesh) { n.castShadow = true; n.receiveShadow = true; }
       });
-
       scene.add(gltf.scene);
-
+      fitCamera(gltf.scene);
       mixer = new THREE.AnimationMixer(gltf.scene);
-      if (gltf.animations.length > 0) buildFingerActions(gltf.animations[0]);
-
+      if (gltf.animations.length) buildFingerActions(gltf.animations[0]);
       if (window.FlutterChannel) FlutterChannel.postMessage('model_ready');
     }
 
     // ── Chunked GLTF injection (Android) ─────────────────────────────────
-    // Flutter sends the GLTF JSON (with bin embedded as data URI) in 50 KB
-    // chunks to stay within evaluateJavascript limits, then calls _parseGLTF.
-    var _gltfChunks = [];
-    window._addGLTFChunk = function (chunk) { _gltfChunks.push(chunk); };
-    window._parseGLTF   = function (basePath) {
-      var jsonStr = _gltfChunks.join('');
-      _gltfChunks = [];
-      new THREE.GLTFLoader().parse(
-        jsonStr,
-        basePath,
-        onGLTFLoaded,
-        function (err) { console.error('GLTF parse error:', err); }
-      );
+    var _chunks = [];
+    window._addGLTFChunk = function (c) { _chunks.push(c); };
+    window._parseGLTF   = function (bp) {
+      var s = _chunks.join(''); _chunks = [];
+      new THREE.GLTFLoader().parse(s, bp, onGLTFLoaded,
+        function (e) { console.error('GLTF parse:', e); });
     };
 
-    // ── Web path: load via XHR (works on HTTP dev server) ────────────────
+    // ── Web path ──────────────────────────────────────────────────────────
     if (!window.FlutterChannel) {
-      new THREE.GLTFLoader().load(
-        '3dhand/scene.gltf',
-        onGLTFLoaded,
-        undefined,
-        function (err) { console.error('GLTF load error:', err); }
-      );
+      new THREE.GLTFLoader().load('3dhand/scene.gltf', onGLTFLoaded, undefined,
+        function (e) { console.error('GLTF load:', e); });
     } else {
-      // Signal Flutter that scripts are ready and it can start sending chunks
       FlutterChannel.postMessage('page_ready');
     }
 
     // ── Finger control ────────────────────────────────────────────────────
     window.setFingerValue = function (finger, value) {
-      var entry = fingerActions[finger];
-      if (!entry || !mixer) return;
-      entry.action.time = value * entry.duration;
+      var e = fingerActions[finger];
+      if (!e || !mixer) return;
+      // 30 % of the animation timeline = visually fully bent.
+      // Scale slider [0 → 1] to animation [0 → 0.30 × duration].
+      e.action.time = value * e.duration * 0.30;
       mixer.update(0);
     };
+
+    // ── Smooth camera fly-to ──────────────────────────────────────────────
+    // Animates BOTH camera position AND controls.target so the hand is
+    // always centred after a preset button press, even after panning.
+    var _flyAnim = null;
+    function flyTo(toPos, toTarget) {
+      if (_flyAnim) cancelAnimationFrame(_flyAnim);
+      toTarget = toTarget || { x: _modelCenter.x, y: _modelCenter.y, z: _modelCenter.z };
+      var fp = { x: camera.position.x, y: camera.position.y, z: camera.position.z };
+      var ft = { x: controls.target.x,  y: controls.target.y,  z: controls.target.z };
+      var t  = 0;
+      controls.autoRotate = false;
+      (function step() {
+        t += 0.05;
+        var k = 1 - Math.pow(1 - Math.min(t, 1), 3); // ease-out cubic
+        camera.position.set(
+          fp.x + (toPos[0] - fp.x) * k,
+          fp.y + (toPos[1] - fp.y) * k,
+          fp.z + (toPos[2] - fp.z) * k
+        );
+        // Simultaneously re-centre the orbit target
+        controls.target.set(
+          ft.x + (toTarget.x - ft.x) * k,
+          ft.y + (toTarget.y - ft.y) * k,
+          ft.z + (toTarget.z - ft.z) * k
+        );
+        controls.update();
+        if (t < 1) _flyAnim = requestAnimationFrame(step);
+      })();
+    }
+
+    // ── Zoom helper (used by +/− buttons) ────────────────────────────────
+    function doZoom(scale) {
+      var offset = new THREE.Vector3().subVectors(camera.position, controls.target);
+      var newLen = Math.max(controls.minDistance,
+                   Math.min(controls.maxDistance, offset.length() * scale));
+      offset.setLength(newLen);
+      camera.position.copy(controls.target).add(offset);
+      controls.update();
+    }
+
+    // ── Zoom buttons ──────────────────────────────────────────────────────
+    document.getElementById('btn-zoom-in').addEventListener('click', function () {
+      doZoom(0.75);
+    });
+    document.getElementById('btn-zoom-out').addEventListener('click', function () {
+      doZoom(1.35);
+    });
+
+    // ── View preset nav buttons ───────────────────────────────────────────
+    // Each entry has:
+    //   dir  – unit direction from which to look at the model
+    //   tgt  – [x,y,z] offset added to _modelCenter for this view's target
+    //          (compensates for the skinned mesh visual centre ≠ bbox centre)
+    //   ds   – distance scale multiplier (default 1.0)
+    var NAV = [
+      { label: 'Front', dir: [ 0,    0.40,  1   ], tgt: [0,    0,    0   ], ds: 1.00 },
+      { label: 'Back',  dir: [ 0,    0.40, -1   ], tgt: [0,    0,    0   ], ds: 0.78 },
+      { label: 'Left',  dir: [-1,    0.35,  0   ], tgt: [0,    0.25, 0.18], ds: 1.00 },
+      { label: 'Right', dir: [ 1,    0.35,  0   ], tgt: [0,    0.25, 0.18], ds: 1.00 },
+      { label: 'Top',   dir: [ 0.20, 1,     0.20], tgt: [0,    0,    0.18], ds: 1.00 },
+      { label: '↺', reset: true },
+    ];
+
+    var nav = document.getElementById('cam-nav');
+    NAV.forEach(function (v) {
+      var btn = document.createElement('button');
+      btn.textContent = v.label;
+      if (v.reset) btn.className = 'reset-btn';
+      btn.addEventListener('click', function () {
+        if (v.reset) {
+          flyTo(
+            [_fitDist * 0.15, _fitDist * 0.35, _fitDist],
+            { x: _modelCenter.x, y: _modelCenter.y, z: _modelCenter.z }
+          );
+        } else {
+          var d   = _fitDist * (v.ds || 1.0);
+          var len = Math.sqrt(v.dir[0]*v.dir[0] + v.dir[1]*v.dir[1] + v.dir[2]*v.dir[2]);
+          var tgt = {
+            x: _modelCenter.x + v.tgt[0],
+            y: _modelCenter.y + v.tgt[1],
+            z: _modelCenter.z + v.tgt[2]
+          };
+          flyTo(
+            [v.dir[0]/len * d, v.dir[1]/len * d, v.dir[2]/len * d],
+            tgt
+          );
+        }
+      });
+      nav.appendChild(btn);
+    });
 
     // ── Resize ────────────────────────────────────────────────────────────
     window.addEventListener('resize', function () {
@@ -186,6 +333,13 @@
       controls.update();
       renderer.render(scene, camera);
     })();
+
+    // ── Dismiss hint ──────────────────────────────────────────────────────
+    var hint = document.getElementById('hint');
+    setTimeout(function () { hint.style.opacity = '0'; }, 3500);
+    renderer.domElement.addEventListener('pointerdown', function () {
+      hint.style.opacity = '0';
+    }, { once: true });
   </script>
 </body>
 </html>
