@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "162508189162",
+    "project_id": "remgloves",
+    "storage_bucket": "remgloves.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:162508189162:android:47f6ddab267874cc3dd693",
+        "android_client_info": {
+          "package_name": "com.example.remgloves_app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyD1cEqLx_-VU_G7zG3o9EL-LQjRX53CFlk"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <style>
+    * { margin: 0; padding: 0; }
+    html, body { width: 100%; height: 100%; overflow: hidden; background: #1a1a2e; }
+    canvas { display: block; }
+  </style>
+</head>
+<body>
+  <script src="threejs/three.min.js"></script>
+  <script src="threejs/GLTFLoader.js"></script>
+  <script src="threejs/OrbitControls.js"></script>
+  <script>
+    // ── Renderer ─────────────────────────────────────────────────────────
+    var renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+    renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+    renderer.setSize(innerWidth, innerHeight);
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type    = THREE.PCFSoftShadowMap;
+    renderer.outputEncoding    = THREE.sRGBEncoding;
+    renderer.toneMapping       = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.2;
+    document.body.appendChild(renderer.domElement);
+
+    // ── Scene ─────────────────────────────────────────────────────────────
+    var scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x1a1a2e);
+    scene.fog = new THREE.Fog(0x1a1a2e, 4, 10);
+
+    // ── Camera ────────────────────────────────────────────────────────────
+    var camera = new THREE.PerspectiveCamera(42, innerWidth / innerHeight, 0.01, 50);
+    camera.position.set(0.4, 0.25, 1.9);
+
+    // ── Lighting ──────────────────────────────────────────────────────────
+    // Soft ambient
+    scene.add(new THREE.AmbientLight(0x8090a0, 0.7));
+
+    // Key light (warm, from upper-right-front)
+    var key = new THREE.DirectionalLight(0xfff0e0, 1.6);
+    key.position.set(1.5, 3, 2);
+    key.castShadow = true;
+    key.shadow.mapSize.set(1024, 1024);
+    key.shadow.camera.near = 0.5;
+    key.shadow.camera.far  = 10;
+    key.shadow.bias        = -0.001;
+    scene.add(key);
+
+    // Fill light (cool, from left)
+    var fill = new THREE.DirectionalLight(0xa0c0ff, 0.5);
+    fill.position.set(-2, 1, 1);
+    scene.add(fill);
+
+    // Accent / rim light (warm orange — matches app primary colour)
+    var rim = new THREE.DirectionalLight(0xf5a623, 0.4);
+    rim.position.set(0, -1, -2);
+    scene.add(rim);
+
+    // ── Floor shadow catcher ──────────────────────────────────────────────
+    var floorGeo = new THREE.PlaneGeometry(4, 4);
+    var floorMat = new THREE.ShadowMaterial({ opacity: 0.25 });
+    var floor = new THREE.Mesh(floorGeo, floorMat);
+    floor.rotation.x = -Math.PI / 2;
+    floor.position.y = -0.85;
+    floor.receiveShadow = true;
+    scene.add(floor);
+
+    // ── Orbit controls ────────────────────────────────────────────────────
+    var controls = new THREE.OrbitControls(camera, renderer.domElement);
+    controls.target.set(0, 0.05, 0);
+    controls.enableDamping    = true;
+    controls.dampingFactor    = 0.08;
+    controls.enablePan        = false;
+    controls.minDistance      = 0.6;
+    controls.maxDistance      = 3.5;
+    controls.minPolarAngle    = Math.PI * 0.1;  // don't go below floor
+    controls.maxPolarAngle    = Math.PI * 0.85;
+    controls.autoRotate       = true;           // slow spin until user touches
+    controls.autoRotateSpeed  = 1.2;
+    controls.update();
+
+    // Stop auto-rotate on first user interaction
+    renderer.domElement.addEventListener('pointerdown', function () {
+      controls.autoRotate = false;
+    }, { once: true });
+
+    // ── Finger → bone-name prefixes ───────────────────────────────────────
+    var fingerPrefixes = {
+      thumb:  ['thumb'],
+      index:  ['index', 'hand.R.001'],
+      middle: ['middle'],
+      ring:   ['ring'],
+      pinky:  ['pinky']
+    };
+
+    var mixer         = null;
+    var fingerActions = {};
+
+    function buildFingerActions(clip) {
+      Object.keys(fingerPrefixes).forEach(function (finger) {
+        var prefixes = fingerPrefixes[finger];
+        var tracks = clip.tracks.filter(function (t) {
+          return prefixes.some(function (p) { return t.name.startsWith(p); });
+        });
+        if (tracks.length === 0) return;
+        var sub    = new THREE.AnimationClip(finger, clip.duration, tracks);
+        var action = mixer.clipAction(sub);
+        action.play();
+        action.paused = true;
+        action.time   = 0;
+        fingerActions[finger] = { action: action, duration: clip.duration };
+      });
+    }
+
+    function onGLTFLoaded(gltf) {
+      // Centre the model
+      var box    = new THREE.Box3().setFromObject(gltf.scene);
+      var centre = box.getCenter(new THREE.Vector3());
+      gltf.scene.position.sub(centre);
+
+      // Enable shadows on every mesh
+      gltf.scene.traverse(function (node) {
+        if (node.isMesh) {
+          node.castShadow    = true;
+          node.receiveShadow = true;
+        }
+      });
+
+      scene.add(gltf.scene);
+
+      mixer = new THREE.AnimationMixer(gltf.scene);
+      if (gltf.animations.length > 0) buildFingerActions(gltf.animations[0]);
+
+      if (window.FlutterChannel) FlutterChannel.postMessage('model_ready');
+    }
+
+    // ── Chunked GLTF injection (Android) ─────────────────────────────────
+    // Flutter sends the GLTF JSON (with bin embedded as data URI) in 50 KB
+    // chunks to stay within evaluateJavascript limits, then calls _parseGLTF.
+    var _gltfChunks = [];
+    window._addGLTFChunk = function (chunk) { _gltfChunks.push(chunk); };
+    window._parseGLTF   = function (basePath) {
+      var jsonStr = _gltfChunks.join('');
+      _gltfChunks = [];
+      new THREE.GLTFLoader().parse(
+        jsonStr,
+        basePath,
+        onGLTFLoaded,
+        function (err) { console.error('GLTF parse error:', err); }
+      );
+    };
+
+    // ── Web path: load via XHR (works on HTTP dev server) ────────────────
+    if (!window.FlutterChannel) {
+      new THREE.GLTFLoader().load(
+        '3dhand/scene.gltf',
+        onGLTFLoaded,
+        undefined,
+        function (err) { console.error('GLTF load error:', err); }
+      );
+    } else {
+      // Signal Flutter that scripts are ready and it can start sending chunks
+      FlutterChannel.postMessage('page_ready');
+    }
+
+    // ── Finger control ────────────────────────────────────────────────────
+    window.setFingerValue = function (finger, value) {
+      var entry = fingerActions[finger];
+      if (!entry || !mixer) return;
+      entry.action.time = value * entry.duration;
+      mixer.update(0);
+    };
+
+    // ── Resize ────────────────────────────────────────────────────────────
+    window.addEventListener('resize', function () {
+      camera.aspect = innerWidth / innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(innerWidth, innerHeight);
+    });
+
+    // ── Render loop ───────────────────────────────────────────────────────
+    (function animate() {
+      requestAnimationFrame(animate);
+      controls.update();
+      renderer.render(scene, camera);
+    })();
+  </script>
+</body>
+</html>
