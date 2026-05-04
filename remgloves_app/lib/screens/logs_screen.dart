@@ -191,37 +191,53 @@ class _LogsScreenState extends State<LogsScreen> {
                             ],
                           ),
                         )
-                      : ScrollbarTheme(
-                          data: ScrollbarThemeData(
-                            thumbColor: WidgetStateProperty.all(
-                                const Color(0xFFFDBF25)),
-                            trackColor: WidgetStateProperty.all(
-                                AppTheme.background),
-                            trackBorderColor:
-                                WidgetStateProperty.all(Colors.transparent),
-                            thickness: WidgetStateProperty.all(10),
-                            radius: const Radius.circular(10),
-                            trackVisibility: WidgetStateProperty.all(true),
-                            thumbVisibility: WidgetStateProperty.all(true),
-                            crossAxisMargin: 8,
-                            mainAxisMargin: 8,
-                          ),
-                          child: Scrollbar(
-                            child: ListView.separated(
-                              padding: const EdgeInsets.only(
-                                  left: 16, right: 36, bottom: 16),
-                              itemCount: _logs.length,
-                              separatorBuilder: (_, _) =>
-                                  const SizedBox(height: 10),
-                              itemBuilder: (context, index) {
-                                final log = _logs[index];
-                                return _LogTile(
-                                  log: log,
-                                  time: _formatTimestamp(log.timestamp),
-                                );
-                              },
-                            ),
-                          ),
+                      // : ScrollbarTheme(
+                      //     data: ScrollbarThemeData(
+                      //       thumbColor: WidgetStateProperty.all(
+                      //           const Color(0xFFFDBF25)),
+                      //       trackColor: WidgetStateProperty.all(
+                      //           AppTheme.background),
+                      //       trackBorderColor:
+                      //           WidgetStateProperty.all(Colors.transparent),
+                      //       thickness: WidgetStateProperty.all(10),
+                      //       radius: const Radius.circular(10),
+                      //       trackVisibility: WidgetStateProperty.all(true),
+                      //       thumbVisibility: WidgetStateProperty.all(true),
+                      //       crossAxisMargin: 8,
+                      //       mainAxisMargin: 8,
+                      //     ),
+                      //     child: Scrollbar(
+                      //       child: ListView.separated(
+                      //         padding: const EdgeInsets.only(
+                      //             left: 16, right: 16, bottom: 16),
+                      //         itemCount: _logs.length,
+                      //         separatorBuilder: (_, _) =>
+                      //             const SizedBox(height: 10),
+                      //         itemBuilder: (context, index) {
+                      //           final log = _logs[index];
+                      //           return _LogTile(
+                      //             log: log,
+                      //             time: _formatTimestamp(log.timestamp),
+                      //           );
+                      //         },
+                      //       ),
+                      //     ),
+                      //   ),
+
+
+                    : ListView.separated(
+                          padding: const EdgeInsets.only(
+                              left: 16, right: 16, bottom: 16),
+                          itemCount: _logs.length,
+                          separatorBuilder: (_, __) =>
+                              const SizedBox(height: 10),
+                          itemBuilder: (context, index) {
+                            final log = _logs[index];
+                            return _LogTile(
+                              log: log,
+                              time: _formatTimestamp(log.timestamp),
+                            );
+                          },
                         ),
             ),
           ],
@@ -247,14 +263,45 @@ class _RtdbLog {
   });
 }
 
-class _LogTile extends StatelessWidget {
+class _LogTile extends StatefulWidget {
   final _RtdbLog log;
   final String time;
-
+ 
   const _LogTile({required this.log, required this.time});
-
+ 
+  @override
+  State<_LogTile> createState() => _LogTileState();
+}
+ 
+class _LogTileState extends State<_LogTile>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _ctrl;
+  late final Animation<double> _expandAnim;
+  bool _expanded = false;
+ 
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 220),
+    );
+    _expandAnim = CurvedAnimation(parent: _ctrl, curve: Curves.easeInOut);
+  }
+ 
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+ 
+  void _toggle() {
+    setState(() => _expanded = !_expanded);
+    _expanded ? _ctrl.forward() : _ctrl.reverse();
+  }
+ 
   String _icon() {
-    switch (log.device) {
+    switch (widget.log.device) {
       case 'tv':
         return _tvIcon;
       case 'fan':
@@ -265,9 +312,9 @@ class _LogTile extends StatelessWidget {
         return AppIcons.chartLine;
     }
   }
-
+ 
   Color _color() {
-    switch (log.device) {
+    switch (widget.log.device) {
       case 'tv':
         return const Color(0xFFF5A623);
       case 'fan':
@@ -278,17 +325,16 @@ class _LogTile extends StatelessWidget {
         return AppTheme.primary;
     }
   }
-
+ 
   @override
   Widget build(BuildContext context) {
-    final icon = _icon();
     final color = _color();
-    final hasCalibration =
-        log.calMin != null && log.calMax != null &&
-        log.calMin!.length == 5 && log.calMax!.length == 5;
-
+    final hasCalibration = widget.log.calMin != null &&
+        widget.log.calMax != null &&
+        widget.log.calMin!.length == 5 &&
+        widget.log.calMax!.length == 5;
+ 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(12),
@@ -301,114 +347,204 @@ class _LogTile extends StatelessWidget {
           ),
         ],
       ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          Container(
-            width: 42,
-            height: 42,
-            decoration: BoxDecoration(
-              color: color.withValues(alpha: 0.12),
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: const Color(0xFF483912), width: 1),
-            ),
-            child: Center(
-              child: Iconify(icon, color: color, size: 22),
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  log.message,
-                  style: const TextStyle(
-                    fontWeight: FontWeight.w600,
-                    fontSize: 13,
-                    color: AppTheme.textPrimary,
+          // ── Header row (always visible) ──────────────────────────────────
+          InkWell(
+            onTap: hasCalibration ? _toggle : null,
+            borderRadius: BorderRadius.circular(12),
+            child: Padding(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              child: Row(
+                children: [
+                  // Device icon box
+                  Container(
+                    width: 42,
+                    height: 42,
+                    decoration: BoxDecoration(
+                      color: color.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(10),
+                      border:
+                          Border.all(color: const Color(0xFF483912), width: 1),
+                    ),
+                    child: Center(
+                      child: Iconify(_icon(), color: color, size: 22),
+                    ),
                   ),
-                ),
-                if (hasCalibration) ...[
-                  const SizedBox(height: 6),
-                  _CalRow(label: 'Min', values: log.calMin!, color: color),
-                  const SizedBox(height: 3),
-                  _CalRow(label: 'Max', values: log.calMax!, color: color),
+                  const SizedBox(width: 12),
+ 
+                  // Label — takes all remaining space before timestamp
+                  Expanded(
+                    child: Text(
+                      widget.log.message,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w600,
+                        fontSize: 13,
+                        color: AppTheme.textPrimary,
+                      ),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+ 
+                  // Timestamp + optional chevron
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        widget.time,
+                        style: const TextStyle(
+                          fontSize: 11,
+                          color: AppTheme.textSecondary,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                      if (hasCalibration) ...[
+                        const SizedBox(height: 4),
+                        AnimatedBuilder(
+                          animation: _expandAnim,
+                          builder: (_, __) => Transform.rotate(
+                            angle: _expandAnim.value * 3.14159,
+                            child: Icon(
+                              Icons.keyboard_arrow_down_rounded,
+                              size: 18,
+                              color: color,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
                 ],
-              ],
-            ),
-          ),
-          const SizedBox(width: 8),
-          Padding(
-            padding: const EdgeInsets.only(top: 2),
-            child: Text(
-              time,
-              style: const TextStyle(
-                fontSize: 11,
-                color: AppTheme.textSecondary,
-                fontWeight: FontWeight.w500,
               ),
             ),
           ),
+ 
+          // ── Expandable calibration panel ─────────────────────────────────
+          if (hasCalibration)
+            SizeTransition(
+              sizeFactor: _expandAnim,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Divider(
+                    height: 1,
+                    thickness: 1,
+                    color: const Color(0xFF483912).withValues(alpha: 0.2),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(14, 10, 14, 12),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Calibration',
+                          style: TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.w700,
+                            color: color,
+                            letterSpacing: 0.5,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        _CalTable(
+                          calMin: widget.log.calMin!,
+                          calMax: widget.log.calMax!,
+                          color: color,
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
         ],
       ),
     );
   }
 }
 
-class _CalRow extends StatelessWidget {
-  final String label;
-  final List<int> values;
+class _CalTable extends StatelessWidget {
+  final List<int> calMin;
+  final List<int> calMax;
   final Color color;
-
-  const _CalRow({
-    required this.label,
-    required this.values,
+ 
+  const _CalTable({
+    required this.calMin,
+    required this.calMax,
     required this.color,
   });
-
+ 
   @override
   Widget build(BuildContext context) {
-    return Row(
+    return Table(
+      defaultVerticalAlignment: TableCellVerticalAlignment.middle,
+      columnWidths: const {
+        0: IntrinsicColumnWidth(), // label column
+      },
       children: [
-        SizedBox(
-          width: 26,
+        // Header row — finger names
+        TableRow(
+          children: [
+            const SizedBox(), // empty corner above label col
+            ..._fingerLabels.map(
+              (f) => Padding(
+                padding: const EdgeInsets.only(bottom: 4),
+                child: Text(
+                  f,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 9,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.grey.shade400,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+        // Min row
+        _buildRow('Min', calMin, color),
+        // Max row
+        _buildRow('Max', calMax, color),
+      ],
+    );
+  }
+ 
+  TableRow _buildRow(String label, List<int> values, Color labelColor) {
+    return TableRow(
+      decoration: BoxDecoration(
+        color: labelColor.withValues(alpha: 0.04),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      children: [
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 6),
           child: Text(
             label,
             style: TextStyle(
               fontSize: 10,
               fontWeight: FontWeight.w700,
-              color: color,
+              color: labelColor,
             ),
           ),
         ),
-        Expanded(
-          child: Row(
-            children: List.generate(5, (i) {
-              return Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      _fingerLabels[i],
-                      style: TextStyle(
-                        fontSize: 8,
-                        color: Colors.grey.shade400,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                    Text(
-                      '${values[i]}',
-                      style: const TextStyle(
-                        fontSize: 10,
-                        color: AppTheme.textSecondary,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ],
-                ),
-              );
-            }),
+        ...values.map(
+          (v) => Padding(
+            padding: const EdgeInsets.symmetric(vertical: 6),
+            child: Text(
+              '$v',
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+                color: AppTheme.textSecondary,
+              ),
+            ),
           ),
         ),
       ],

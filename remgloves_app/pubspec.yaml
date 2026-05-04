@@ -70,6 +70,7 @@ flutter:
     - lib/assets/3dhand/
     - lib/assets/3dhand/textures/
     - lib/assets/threejs/
+    - lib/assets/remglove-refined-logo.svg
 
   # To add custom fonts to your application, add a fonts section here,
   # in this "flutter" section. Each entry in this list should have a

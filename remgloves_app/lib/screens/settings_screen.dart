@@ -34,92 +34,79 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ),
               ),
             ),
-            Expanded(
-              child: ScrollbarTheme(
-                data: ScrollbarThemeData(
-                  thumbColor: WidgetStateProperty.all(const Color(0xFFFDBF25)),
-                  trackColor: WidgetStateProperty.all(AppTheme.background),
-                  trackBorderColor: WidgetStateProperty.all(Colors.transparent),
-                  thickness: WidgetStateProperty.all(10),
-                  radius: const Radius.circular(10),
-                  trackVisibility: WidgetStateProperty.all(true),
-                  thumbVisibility: WidgetStateProperty.all(true),
-                  crossAxisMargin: 8,
-                  mainAxisMargin: 8,
-                ),
-                child: Scrollbar(
-                  child: ListView(
-                    padding: const EdgeInsets.only(left: 16, right: 36, bottom: 24),
-                    children: [
-                      const SizedBox(height: 4),
 
-                      // ── Account ──────────────────────────────────────────
-                      const _SectionHeader(title: 'Account'),
-                      const SizedBox(height: 10),
-                      _SettingsTile(
-                        icon: Icons.person_outline,
-                        iconColor: AppTheme.primary,
-                        title: 'User Profile',
-                        subtitle: 'RemGlove Admin',
-                        trailing: const Icon(Icons.insert_drive_file_outlined, size: 20, color: AppTheme.textSecondary),
-                        onTap: () => _showUserProfileSheet(context),
-                      ),
-                      const SizedBox(height: 10),
-                      _SettingsTile(
-                        icon: Icons.pan_tool_alt_outlined,
-                        iconColor: AppTheme.primary,
-                        title: 'Gesture Guide',
-                        onTap: () => _showGestureGuideSheet(context),
-                      ),
-                      const SizedBox(height: 20),
-
-                      // ── Connectivity ──────────────────────────────────────
-                      const _SectionHeader(title: 'Connectivity'),
-                      const SizedBox(height: 10),
-                      _ConnectivityTile(
-                        icon: Icons.bluetooth,
-                        iconColor: Colors.blue,
-                        bgColor: Colors.blue.withOpacity(0.08),
-                        title: 'Bluetooth',
-                        value: _bluetoothOn,
-                        onChanged: (v) => setState(() => _bluetoothOn = v),
-                      ),
-                      const SizedBox(height: 10),
-                      _ConnectivityTile(
-                        icon: Icons.wifi,
-                        iconColor: Colors.white,
-                        bgColor: AppTheme.toggleOn,
-                        title: 'Wifi',
-                        value: _wifiOn,
-                        onChanged: (v) => setState(() => _wifiOn = v),
-                      ),
-                      const SizedBox(height: 20),
-
-                      // ── About ─────────────────────────────────────────────
-                      const _SectionHeader(title: 'About'),
-                      const SizedBox(height: 10),
-                      _SettingsTile(
-                        icon: Icons.info_outline,
-                        iconColor: AppTheme.primary,
-                        title: 'App Version',
-                        subtitle: 'v1.0.0',
-                      ),
-                      _SettingsTile(
-                        icon: Icons.shield_outlined,
-                        iconColor: AppTheme.primary,
-                        title: 'Privacy Policy',
-                        onTap: () {},
-                      ),
-                      _SettingsTile(
-                        icon: Icons.logout,
-                        iconColor: Colors.red,
-                        title: 'Sign Out',
-                        titleColor: Colors.red,
-                        onTap: () {},
-                      ),
-                    ],
+            
+              Expanded(
+              child: ListView(
+                padding: const EdgeInsets.only(left: 16, right: 16, bottom: 24),
+                children: [
+                  const SizedBox(height: 4),
+ 
+                  // ── Account ──────────────────────────────────────────
+                  const _SectionHeader(title: 'Account'),
+                  const SizedBox(height: 10),
+                  _SettingsTile(
+                    icon: Icons.person_outline,
+                    iconColor: AppTheme.primary,
+                    title: 'User Profile',
+                    subtitle: 'RemGlove Admin',
+                    trailing: const Icon(Icons.insert_drive_file_outlined, size: 20, color: AppTheme.textSecondary),
+                    onTap: () => _showUserProfileSheet(context),
                   ),
-                ),
+                  const SizedBox(height: 10),
+                  _SettingsTile(
+                    icon: Icons.pan_tool_alt_outlined,
+                    iconColor: AppTheme.primary,
+                    title: 'Gesture Guide',
+                    onTap: () => _showGestureGuideSheet(context),
+                  ),
+                  const SizedBox(height: 20),
+ 
+                  // ── Connectivity ──────────────────────────────────────
+                  const _SectionHeader(title: 'Connectivity'),
+                  const SizedBox(height: 10),
+                  _ConnectivityTile(
+                    icon: Icons.bluetooth,
+                    iconColor: Colors.blue,
+                    bgColor: Colors.blue.withOpacity(0.08),
+                    title: 'Bluetooth',
+                    value: _bluetoothOn,
+                    onChanged: (v) => setState(() => _bluetoothOn = v),
+                  ),
+                  const SizedBox(height: 10),
+                  _ConnectivityTile(
+                    icon: Icons.wifi,
+                    iconColor: Colors.white,
+                    bgColor: AppTheme.toggleOn,
+                    title: 'Wifi',
+                    value: _wifiOn,
+                    onChanged: (v) => setState(() => _wifiOn = v),
+                  ),
+                  const SizedBox(height: 20),
+ 
+                  // ── About ─────────────────────────────────────────────
+                  const _SectionHeader(title: 'About'),
+                  const SizedBox(height: 10),
+                  _SettingsTile(
+                    icon: Icons.info_outline,
+                    iconColor: AppTheme.primary,
+                    title: 'App Version',
+                    subtitle: 'v1.0.0',
+                  ),
+                  _SettingsTile(
+                    icon: Icons.shield_outlined,
+                    iconColor: AppTheme.primary,
+                    title: 'Privacy Policy',
+                    onTap: () {},
+                  ),
+                  _SettingsTile(
+                    icon: Icons.logout,
+                    iconColor: Colors.red,
+                    title: 'Sign Out',
+                    titleColor: Colors.red,
+                    onTap: () {},
+                  ),
+                ],
               ),
             ),
           ],

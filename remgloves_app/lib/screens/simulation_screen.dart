@@ -475,51 +475,72 @@ class _SimulationScreenState extends State<SimulationScreen> {
 class _FingerToggle extends StatelessWidget {
   final String label;
   final bool isBent;
-  final ValueChanged<bool>? onChanged; // null = read-only (live BLE mode)
-
+  final ValueChanged<bool>? onChanged;
+ 
   const _FingerToggle({
     required this.label,
     required this.isBent,
     required this.onChanged,
   });
-
+ 
   @override
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Row(children: [
-        SizedBox(
-          width: 54,
-          child: Text(label,
+      child: Row(
+        children: [
+          // Finger name — fixed width, left-anchored
+          SizedBox(
+            width: 54,
+            child: Text(
+              label,
               style: const TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w500,
-                  color: AppTheme.textSecondary)),
-        ),
-        Text(
-          'Straight',
-          style: TextStyle(
-            fontSize: 11,
-            fontWeight: isBent ? FontWeight.w400 : FontWeight.w600,
-            color: isBent ? AppTheme.textSecondary : AppTheme.primary,
+                fontSize: 12,
+                fontWeight: FontWeight.w500,
+                color: AppTheme.textSecondary,
+              ),
+            ),
           ),
-        ),
-        Switch(
-          value: isBent,
-          onChanged: onChanged,
-          activeThumbColor: AppTheme.primary,
-          activeTrackColor: AppTheme.primary.withValues(alpha: 0.5),
-          materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-        ),
-        Text(
-          'Bent',
-          style: TextStyle(
-            fontSize: 11,
-            fontWeight: isBent ? FontWeight.w600 : FontWeight.w400,
-            color: isBent ? AppTheme.primary : AppTheme.textSecondary,
+ 
+          // Pushes the toggle group to the right
+          const Spacer(),
+ 
+          // "Straight" label
+          Text(
+            'Straight',
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: isBent ? FontWeight.w400 : FontWeight.w600,
+              color: isBent ? AppTheme.primary : AppTheme.textSecondary,
+            ),
           ),
-        ),
-      ]),
+          const SizedBox(width: 4),
+ 
+          // Toggle switch
+          Switch(
+            value: isBent,
+            onChanged: onChanged,
+            activeThumbColor: AppTheme.primary,
+            activeTrackColor: AppTheme.primary.withValues(alpha: 0.5),
+            materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          ),
+          const SizedBox(width: 4),
+ 
+          // "Bent" label — fixed width so the column stays stable
+          SizedBox(
+            width: 32,
+            child: Text(
+              'Bent',
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: isBent ? FontWeight.w600 : FontWeight.w400,
+                color: isBent ?  AppTheme.primary : AppTheme.textSecondary,
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
+
