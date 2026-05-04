@@ -47,6 +47,7 @@ class DefaultFirebaseOptions {
     projectId: 'remgloves',
     authDomain: 'remgloves.firebaseapp.com',
     storageBucket: 'remgloves.firebasestorage.app',
+    databaseURL: 'https://remgloves-default-rtdb.asia-southeast1.firebasedatabase.app',
   );
 
   static const FirebaseOptions android = FirebaseOptions(
@@ -55,6 +56,7 @@ class DefaultFirebaseOptions {
     messagingSenderId: '162508189162',
     projectId: 'remgloves',
     storageBucket: 'remgloves.firebasestorage.app',
+    databaseURL: 'https://remgloves-default-rtdb.asia-southeast1.firebasedatabase.app',
   );
 
   static const FirebaseOptions ios = FirebaseOptions(
@@ -63,6 +65,7 @@ class DefaultFirebaseOptions {
     messagingSenderId: '162508189162',
     projectId: 'remgloves',
     storageBucket: 'remgloves.firebasestorage.app',
+    databaseURL: 'https://remgloves-default-rtdb.asia-southeast1.firebasedatabase.app',
     iosBundleId: 'com.example.remglovesApp',
   );
 
@@ -72,6 +75,7 @@ class DefaultFirebaseOptions {
     messagingSenderId: '162508189162',
     projectId: 'remgloves',
     storageBucket: 'remgloves.firebasestorage.app',
+    databaseURL: 'https://remgloves-default-rtdb.asia-southeast1.firebasedatabase.app',
     iosBundleId: 'com.example.remglovesApp',
   );
 
@@ -82,5 +86,6 @@ class DefaultFirebaseOptions {
     projectId: 'remgloves',
     authDomain: 'remgloves.firebaseapp.com',
     storageBucket: 'remgloves.firebasestorage.app',
+    databaseURL: 'https://remgloves-default-rtdb.asia-southeast1.firebasedatabase.app',
   );
 }
