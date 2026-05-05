@@ -229,7 +229,7 @@ class _LogsScreenState extends State<LogsScreen> {
                           padding: const EdgeInsets.only(
                               left: 16, right: 16, bottom: 16),
                           itemCount: _logs.length,
-                          separatorBuilder: (_, __) =>
+                          separatorBuilder: (_, _) =>
                               const SizedBox(height: 10),
                           itemBuilder: (context, index) {
                             final log = _logs[index];
@@ -407,7 +407,7 @@ class _LogTileState extends State<_LogTile>
                         const SizedBox(height: 4),
                         AnimatedBuilder(
                           animation: _expandAnim,
-                          builder: (_, __) => Transform.rotate(
+                          builder: (_, _) => Transform.rotate(
                             angle: _expandAnim.value * 3.14159,
                             child: Icon(
                               Icons.keyboard_arrow_down_rounded,

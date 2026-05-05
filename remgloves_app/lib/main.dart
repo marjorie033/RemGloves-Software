@@ -7,6 +7,7 @@ import 'screens/monitor_screen.dart';
 import 'screens/simulation_screen.dart';
 import 'screens/logs_screen.dart';
 import 'screens/settings_screen.dart';
+import 'services/mqtt_service.dart';
 import 'theme/app_theme.dart';
 import 'theme/app_icons.dart';
 
@@ -46,14 +47,27 @@ class MainShell extends StatefulWidget {
 
 class _MainShellState extends State<MainShell> {
   int _currentIndex = 0;
+  late final MqttService _mqttService;
+  late final List<Widget> _screens;
 
-  final List<Widget> _screens = const [
-    MonitorScreen(),
-    SimulationScreen(),
-    // SimulationTesting(),
-    LogsScreen(),
-    SettingsScreen(),
-  ];
+  @override
+  void initState() {
+    super.initState();
+    _mqttService = MqttService();
+    _mqttService.connect();
+    _screens = [
+      MonitorScreen(mqttService: _mqttService),
+      const SimulationScreen(),
+      const LogsScreen(),
+      const SettingsScreen(),
+    ];
+  }
+
+  @override
+  void dispose() {
+    _mqttService.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -139,8 +153,8 @@ class _BottomNavBar extends StatelessWidget {
 }
 
 class _NavItem {
-  final String icon;        
-  final String activeIcon;  
+  final String icon;
+  final String activeIcon;
   final String label;
 
   const _NavItem({
