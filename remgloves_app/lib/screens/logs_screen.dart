@@ -88,6 +88,40 @@ class _RtdbLog {
   });
 }
 
+// ── Summary cache (per range, lives for the day) ─────────────────────────────
+
+class _SummaryCache {
+  final String summary;
+  final DateTime fetchedAt;
+  final int logCount;
+  final Map<String, int> deviceCounts;
+  final int calibrationCount;
+
+  _SummaryCache({
+    required this.summary,
+    required this.fetchedAt,
+    required this.logCount,
+    required this.deviceCounts,
+    required this.calibrationCount,
+  });
+
+  bool get isToday {
+    final now = DateTime.now();
+    return fetchedAt.year == now.year &&
+        fetchedAt.month == now.month &&
+        fetchedAt.day == now.day;
+  }
+
+  String get fetchedAtLabel {
+    final h = fetchedAt.hour > 12
+        ? fetchedAt.hour - 12
+        : (fetchedAt.hour == 0 ? 12 : fetchedAt.hour);
+    final period = fetchedAt.hour >= 12 ? 'PM' : 'AM';
+    final m = fetchedAt.minute.toString().padLeft(2, '0');
+    return '$h:$m $period';
+  }
+}
+
 // ── Screen ────────────────────────────────────────────────────────────────────
 
 class LogsScreen extends StatefulWidget {
@@ -105,20 +139,19 @@ class _LogsScreenState extends State<LogsScreen> {
 
   // Analytics
   _Range _selectedRange = _Range.week;
-  String? _summary;
+  final Map<_Range, _SummaryCache> _cache = {};
   bool _summaryLoading = false;
   String? _summaryError;
+  final Set<_Range> _upToDateRanges = {};
 
-  // Stats derived from analytics fetch
-  int _analyticsTotal = 0;
-  Map<String, int> _deviceCounts = {};
-  int _calibrationCount = 0;
+  _SummaryCache? get _currentCache => _cache[_selectedRange];
+  bool get _isUpToDate => _upToDateRanges.contains(_selectedRange);
 
   @override
   void initState() {
     super.initState();
     _startLiveFeed();
-    _fetchAnalytics();
+    _autoLoadIfNeeded();
   }
 
   @override
@@ -165,13 +198,26 @@ class _LogsScreenState extends State<LogsScreen> {
     });
   }
 
-  // ── Analytics fetch (one-shot, time-range) ─────────────────────────────────
+  // ── Analytics ─────────────────────────────────────────────────────────────
 
-  Future<void> _fetchAnalytics() async {
+  // Called on init: only fetches if no today's cache exists for this range.
+  void _autoLoadIfNeeded() {
+    final cached = _cache[_selectedRange];
+    if (cached == null || !cached.isToday) {
+      _doFetch(checkForChanges: false);
+    }
+  }
+
+  // Called by the manual refresh button.
+  Future<void> _refreshAnalytics() async {
+    _doFetch(checkForChanges: true);
+  }
+
+  Future<void> _doFetch({required bool checkForChanges}) async {
+    if (_summaryLoading) return;
     setState(() {
       _summaryLoading = true;
       _summaryError = null;
-      _summary = null;
     });
 
     try {
@@ -204,15 +250,29 @@ class _LogsScreenState extends State<LogsScreen> {
       }
 
       if (!mounted) return;
-      setState(() {
-        _analyticsTotal = total;
-        _deviceCounts = deviceCounts;
-        _calibrationCount = calibrations;
-      });
+
+      // If manual refresh and count hasn't changed — no need to call Gemini.
+      if (checkForChanges) {
+        final cached = _cache[_selectedRange];
+        if (cached != null && cached.logCount == total) {
+          setState(() {
+            _summaryLoading = false;
+            _upToDateRanges.add(_selectedRange);
+          });
+          return;
+        }
+      }
 
       if (total == 0) {
         setState(() {
-          _summary = 'No gestures recorded in this period.';
+          _cache[_selectedRange] = _SummaryCache(
+            summary: 'No gestures recorded in this period.',
+            fetchedAt: DateTime.now(),
+            logCount: 0,
+            deviceCounts: {},
+            calibrationCount: 0,
+          );
+          _upToDateRanges.remove(_selectedRange);
           _summaryLoading = false;
         });
         return;
@@ -229,7 +289,14 @@ class _LogsScreenState extends State<LogsScreen> {
 
       if (mounted) {
         setState(() {
-          _summary = summaryText;
+          _cache[_selectedRange] = _SummaryCache(
+            summary: summaryText,
+            fetchedAt: DateTime.now(),
+            logCount: total,
+            deviceCounts: deviceCounts,
+            calibrationCount: calibrations,
+          );
+          _upToDateRanges.remove(_selectedRange);
           _summaryLoading = false;
         });
       }
@@ -303,7 +370,7 @@ class _LogsScreenState extends State<LogsScreen> {
           const SizedBox(height: 12),
           _buildRangeChips(),
           const SizedBox(height: 12),
-          if (_analyticsTotal > 0) ...[
+          if ((_currentCache?.logCount ?? 0) > 0) ...[
             _buildStatRow(),
             const SizedBox(height: 12),
           ],
@@ -335,9 +402,12 @@ class _LogsScreenState extends State<LogsScreen> {
               color: AppTheme.primary,
             ),
           )
+        else if (_isUpToDate)
+          const Icon(Icons.check_circle_rounded,
+              size: 18, color: Colors.green)
         else
           GestureDetector(
-            onTap: _fetchAnalytics,
+            onTap: _refreshAnalytics,
             child: const Icon(Icons.refresh_rounded,
                 size: 20, color: AppTheme.textSecondary),
           ),
@@ -355,7 +425,6 @@ class _LogsScreenState extends State<LogsScreen> {
             onTap: () {
               if (!selected) {
                 setState(() => _selectedRange = range);
-                _fetchAnalytics();
               }
             },
             child: AnimatedContainer(
@@ -387,9 +456,11 @@ class _LogsScreenState extends State<LogsScreen> {
   }
 
   Widget _buildStatRow() {
-    final topDevice = _deviceCounts.entries.isEmpty
+    final cache = _currentCache;
+    final deviceCounts = cache?.deviceCounts ?? {};
+    final topDevice = deviceCounts.entries.isEmpty
         ? null
-        : (_deviceCounts.entries.toList()
+        : (deviceCounts.entries.toList()
               ..sort((a, b) => b.value.compareTo(a.value)))
             .first;
 
@@ -397,7 +468,7 @@ class _LogsScreenState extends State<LogsScreen> {
       children: [
         _StatChip(
           label: 'Total',
-          value: '$_analyticsTotal',
+          value: '${cache?.logCount ?? 0}',
           color: AppTheme.primary,
         ),
         const SizedBox(width: 8),
@@ -411,7 +482,7 @@ class _LogsScreenState extends State<LogsScreen> {
         ],
         _StatChip(
           label: 'Calibrations',
-          value: '$_calibrationCount',
+          value: '${cache?.calibrationCount ?? 0}',
           color: Colors.purple.shade300,
         ),
       ],
@@ -441,16 +512,12 @@ class _LogsScreenState extends State<LogsScreen> {
                 child: Column(
                   children: [
                     CircularProgressIndicator(
-                      strokeWidth: 2,
-                      color: AppTheme.primary,
-                    ),
+                        strokeWidth: 2, color: AppTheme.primary),
                     SizedBox(height: 8),
                     Text(
                       'Generating summary…',
                       style: TextStyle(
-                        fontSize: 12,
-                        color: AppTheme.textSecondary,
-                      ),
+                          fontSize: 12, color: AppTheme.textSecondary),
                     ),
                   ],
                 ),
@@ -463,51 +530,91 @@ class _LogsScreenState extends State<LogsScreen> {
                     const Text(
                       'Could not load summary.',
                       style: TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                        color: Colors.red,
-                      ),
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: Colors.red),
                     ),
                     const SizedBox(height: 4),
                     Text(
                       _summaryError!,
                       style: const TextStyle(
-                        fontSize: 11,
-                        color: AppTheme.textSecondary,
+                          fontSize: 11, color: AppTheme.textSecondary),
+                    ),
+                    const SizedBox(height: 8),
+                    GestureDetector(
+                      onTap: _refreshAnalytics,
+                      child: const Text(
+                        'Tap to retry',
+                        style: TextStyle(
+                            fontSize: 12,
+                            color: AppTheme.primary,
+                            fontWeight: FontWeight.w600),
                       ),
                     ),
                   ],
                 )
-              : Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
+              : _currentCache == null
+                  ? Row(
                       children: [
                         const Icon(Icons.auto_awesome_rounded,
-                            size: 14, color: AppTheme.primary),
-                        const SizedBox(width: 4),
-                        Text(
-                          'AI Summary · ${_selectedRange.label}',
-                          style: const TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w700,
-                            color: AppTheme.primary,
-                            letterSpacing: 0.3,
+                            size: 14, color: AppTheme.textSecondary),
+                        const SizedBox(width: 6),
+                        const Expanded(
+                          child: Text(
+                            'Tap ↻ to generate your first summary for this period.',
+                            style: TextStyle(
+                                fontSize: 13, color: AppTheme.textSecondary),
                           ),
                         ),
                       ],
+                    )
+                  : Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Icon(
+                              _isUpToDate
+                                  ? Icons.check_circle_rounded
+                                  : Icons.auto_awesome_rounded,
+                              size: 14,
+                              color: _isUpToDate
+                                  ? Colors.green
+                                  : AppTheme.primary,
+                            ),
+                            const SizedBox(width: 4),
+                            Text(
+                              _isUpToDate
+                                  ? 'Up to date · ${_selectedRange.label}'
+                                  : 'AI Summary · ${_selectedRange.label}',
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w700,
+                                color: _isUpToDate
+                                    ? Colors.green
+                                    : AppTheme.primary,
+                                letterSpacing: 0.3,
+                              ),
+                            ),
+                            const Spacer(),
+                            Text(
+                              'Updated ${_currentCache!.fetchedAtLabel}',
+                              style: const TextStyle(
+                                  fontSize: 10,
+                                  color: AppTheme.textSecondary),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          _currentCache!.summary,
+                          style: const TextStyle(
+                              fontSize: 13,
+                              color: AppTheme.textPrimary,
+                              height: 1.5),
+                        ),
+                      ],
                     ),
-                    const SizedBox(height: 8),
-                    Text(
-                      _summary ?? 'Tap refresh to generate a summary.',
-                      style: const TextStyle(
-                        fontSize: 13,
-                        color: AppTheme.textPrimary,
-                        height: 1.5,
-                      ),
-                    ),
-                  ],
-                ),
     );
   }
 

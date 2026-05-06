@@ -23,37 +23,47 @@ class LogSummaryInput {
 class AiSummaryService {
   static const _endpoint =
       'https://generativelanguage.googleapis.com/v1beta/models/'
-      'gemini-2.0-flash:generateContent';
+      'gemini-2.5-flash-lite:generateContent';
 
   static Future<String> summarize(LogSummaryInput input) async {
     final prompt = _buildPrompt(input);
+    final body = jsonEncode({
+      'contents': [
+        {
+          'parts': [
+            {'text': prompt}
+          ]
+        }
+      ],
+      'generationConfig': {
+        'temperature': 0.4,
+        'maxOutputTokens': 300,
+      },
+    });
 
-    final response = await http.post(
-      Uri.parse('$_endpoint?key=$geminiApiKey'),
-      headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({
-        'contents': [
-          {
-            'parts': [
-              {'text': prompt}
-            ]
-          }
-        ],
-        'generationConfig': {
-          'temperature': 0.4,
-          'maxOutputTokens': 300,
-        },
-      }),
-    );
+    for (int attempt = 0; attempt < 2; attempt++) {
+      final response = await http.post(
+        Uri.parse('$_endpoint?key=$geminiApiKey'),
+        headers: {'Content-Type': 'application/json'},
+        body: body,
+      );
 
-    if (response.statusCode != 200) {
-      throw Exception('Gemini error ${response.statusCode}: ${response.body}');
+      if (response.statusCode == 429 && attempt == 0) {
+        await Future.delayed(const Duration(seconds: 5));
+        continue;
+      }
+
+      if (response.statusCode != 200) {
+        throw Exception('Gemini error ${response.statusCode}: ${response.body}');
+      }
+
+      final json = jsonDecode(response.body) as Map<String, dynamic>;
+      final text = json['candidates']?[0]?['content']?['parts']?[0]?['text']
+          as String?;
+      return text?.trim() ?? 'No summary available.';
     }
 
-    final json = jsonDecode(response.body) as Map<String, dynamic>;
-    final text = json['candidates']?[0]?['content']?['parts']?[0]?['text']
-        as String?;
-    return text?.trim() ?? 'No summary available.';
+    throw Exception('Rate limit exceeded. Please wait a moment and try again.');
   }
 
   static String _buildPrompt(LogSummaryInput input) {
