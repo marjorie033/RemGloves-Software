@@ -6,6 +6,7 @@ import '../theme/app_icons.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_bar.dart';
 import '../widgets/rounded_body.dart';
+import '../services/ai_summary_service.dart';
 
 const String _tvIcon =
     '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">'
@@ -24,12 +25,42 @@ const String _lightIcon =
 
 const _fingerLabels = ['Thumb', 'Index', 'Middle', 'Ring', 'Pinky'];
 
+// ── Range options ─────────────────────────────────────────────────────────────
+
+enum _Range { day, week, month }
+
+extension _RangeLabel on _Range {
+  String get label {
+    switch (this) {
+      case _Range.day:
+        return 'Today';
+      case _Range.week:
+        return '7 Days';
+      case _Range.month:
+        return '30 Days';
+    }
+  }
+
+  int get milliseconds {
+    switch (this) {
+      case _Range.day:
+        return const Duration(days: 1).inMilliseconds;
+      case _Range.week:
+        return const Duration(days: 7).inMilliseconds;
+      case _Range.month:
+        return const Duration(days: 30).inMilliseconds;
+    }
+  }
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
 String _inferDevice(String cmd) {
   final lower = cmd.toLowerCase();
-  if (lower.startsWith('tv')) return 'tv';
-  if (lower.startsWith('fan')) return 'fan';
-  if (lower.startsWith('light')) return 'light';
-  return 'general';
+  if (lower.startsWith('tv')) return 'TV';
+  if (lower.startsWith('fan')) return 'Fan';
+  if (lower.startsWith('light')) return 'Light';
+  return 'General';
 }
 
 List<int>? _parseIntList(dynamic raw) {
@@ -39,6 +70,26 @@ List<int>? _parseIntList(dynamic raw) {
   return null;
 }
 
+// ── Data model ────────────────────────────────────────────────────────────────
+
+class _RtdbLog {
+  final String message;
+  final int timestamp;
+  final String device;
+  final List<int>? calMin;
+  final List<int>? calMax;
+
+  const _RtdbLog({
+    required this.message,
+    required this.timestamp,
+    required this.device,
+    this.calMin,
+    this.calMax,
+  });
+}
+
+// ── Screen ────────────────────────────────────────────────────────────────────
+
 class LogsScreen extends StatefulWidget {
   const LogsScreen({super.key});
 
@@ -47,15 +98,39 @@ class LogsScreen extends StatefulWidget {
 }
 
 class _LogsScreenState extends State<LogsScreen> {
+  // Live feed (last 100)
   StreamSubscription<DatabaseEvent>? _sub;
   List<_RtdbLog> _logs = [];
-  bool _loading = true;
+  bool _logsLoading = true;
+
+  // Analytics
+  _Range _selectedRange = _Range.week;
+  String? _summary;
+  bool _summaryLoading = false;
+  String? _summaryError;
+
+  // Stats derived from analytics fetch
+  int _analyticsTotal = 0;
+  Map<String, int> _deviceCounts = {};
+  int _calibrationCount = 0;
 
   @override
   void initState() {
     super.initState();
-    final ref = FirebaseDatabase.instance.ref('gestures');
+    _startLiveFeed();
+    _fetchAnalytics();
+  }
 
+  @override
+  void dispose() {
+    _sub?.cancel();
+    super.dispose();
+  }
+
+  // ── Live feed (real-time, last 100) ────────────────────────────────────────
+
+  void _startLiveFeed() {
+    final ref = FirebaseDatabase.instance.ref('gestures');
     _sub = ref.orderByChild('t').limitToLast(100).onValue.listen((event) {
       final raw = event.snapshot.value;
       final parsed = <_RtdbLog>[];
@@ -77,12 +152,12 @@ class _LogsScreenState extends State<LogsScreen> {
       if (mounted) {
         setState(() {
           _logs = parsed;
-          _loading = false;
+          _logsLoading = false;
         });
       }
     }, onError: (e) {
       if (mounted) {
-        setState(() => _loading = false);
+        setState(() => _logsLoading = false);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('RTDB error: $e')),
         );
@@ -90,11 +165,85 @@ class _LogsScreenState extends State<LogsScreen> {
     });
   }
 
-  @override
-  void dispose() {
-    _sub?.cancel();
-    super.dispose();
+  // ── Analytics fetch (one-shot, time-range) ─────────────────────────────────
+
+  Future<void> _fetchAnalytics() async {
+    setState(() {
+      _summaryLoading = true;
+      _summaryError = null;
+      _summary = null;
+    });
+
+    try {
+      final now = DateTime.now().millisecondsSinceEpoch;
+      final start = now - _selectedRange.milliseconds;
+
+      final ref = FirebaseDatabase.instance.ref('gestures');
+      final snapshot =
+          await ref.orderByChild('t').startAt(start).endAt(now).get();
+
+      final raw = snapshot.value;
+      final deviceCounts = <String, int>{};
+      final commandCounts = <String, int>{};
+      int total = 0;
+      int calibrations = 0;
+
+      if (raw is Map) {
+        raw.forEach((_, val) {
+          if (val is Map) {
+            total++;
+            final cmd = val['cmd'] as String? ?? '';
+            final device = _inferDevice(cmd);
+            deviceCounts[device] = (deviceCounts[device] ?? 0) + 1;
+            if (cmd.isNotEmpty) {
+              commandCounts[cmd] = (commandCounts[cmd] ?? 0) + 1;
+            }
+            if (val['calMin'] != null) calibrations++;
+          }
+        });
+      }
+
+      if (!mounted) return;
+      setState(() {
+        _analyticsTotal = total;
+        _deviceCounts = deviceCounts;
+        _calibrationCount = calibrations;
+      });
+
+      if (total == 0) {
+        setState(() {
+          _summary = 'No gestures recorded in this period.';
+          _summaryLoading = false;
+        });
+        return;
+      }
+
+      final summaryText = await AiSummaryService.summarize(LogSummaryInput(
+        totalCount: total,
+        deviceCounts: deviceCounts,
+        commandCounts: commandCounts,
+        calibrationCount: calibrations,
+        rangeStart: DateTime.fromMillisecondsSinceEpoch(start),
+        rangeEnd: DateTime.fromMillisecondsSinceEpoch(now),
+      ));
+
+      if (mounted) {
+        setState(() {
+          _summary = summaryText;
+          _summaryLoading = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _summaryError = e.toString();
+          _summaryLoading = false;
+        });
+      }
+    }
   }
+
+  // ── Helpers ────────────────────────────────────────────────────────────────
 
   String _formatTimestamp(int ms) {
     if (ms == 0) return '—';
@@ -110,175 +259,435 @@ class _LogsScreenState extends State<LogsScreen> {
     return '${months[dt.month - 1]} ${dt.day}, $hour:$min $period';
   }
 
+  Color _deviceColor(String device) {
+    switch (device) {
+      case 'TV':
+        return const Color(0xFFF5A623);
+      case 'Fan':
+        return const Color(0xFF29B6F6);
+      case 'Light':
+        return const Color(0xFFFDD835);
+      default:
+        return AppTheme.primary;
+    }
+  }
+
+  // ── Build ──────────────────────────────────────────────────────────────────
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: const RemGloveAppBar(),
       backgroundColor: AppTheme.primary,
       body: RoundedBody(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
-              child: Row(
-                children: [
-                  const Text(
-                    'History',
-                    style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w700,
-                      color: AppTheme.textPrimary,
-                    ),
-                  ),
-                  const Spacer(),
-                  Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: Colors.green.shade50,
-                      borderRadius: BorderRadius.circular(20),
-                      border: Border.all(color: Colors.green.shade300),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Container(
-                          width: 6,
-                          height: 6,
-                          decoration: const BoxDecoration(
-                            color: Colors.green,
-                            shape: BoxShape.circle,
-                          ),
-                        ),
-                        const SizedBox(width: 4),
-                        Text(
-                          'Live',
-                          style: TextStyle(
-                            fontSize: 11,
-                            color: Colors.green.shade700,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            Expanded(
-              child: _loading
-                  ? const Center(
-                      child:
-                          CircularProgressIndicator(color: AppTheme.primary),
-                    )
-                  : _logs.isEmpty
-                      ? Center(
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(Icons.history,
-                                  size: 48, color: Colors.grey.shade300),
-                              const SizedBox(height: 12),
-                              const Text(
-                                'No logs yet.',
-                                textAlign: TextAlign.center,
-                                style: TextStyle(
-                                  color: AppTheme.textSecondary,
-                                  fontSize: 13,
-                                ),
-                              ),
-                            ],
-                          ),
-                        )
-                      // : ScrollbarTheme(
-                      //     data: ScrollbarThemeData(
-                      //       thumbColor: WidgetStateProperty.all(
-                      //           const Color(0xFFFDBF25)),
-                      //       trackColor: WidgetStateProperty.all(
-                      //           AppTheme.background),
-                      //       trackBorderColor:
-                      //           WidgetStateProperty.all(Colors.transparent),
-                      //       thickness: WidgetStateProperty.all(10),
-                      //       radius: const Radius.circular(10),
-                      //       trackVisibility: WidgetStateProperty.all(true),
-                      //       thumbVisibility: WidgetStateProperty.all(true),
-                      //       crossAxisMargin: 8,
-                      //       mainAxisMargin: 8,
-                      //     ),
-                      //     child: Scrollbar(
-                      //       child: ListView.separated(
-                      //         padding: const EdgeInsets.only(
-                      //             left: 16, right: 16, bottom: 16),
-                      //         itemCount: _logs.length,
-                      //         separatorBuilder: (_, _) =>
-                      //             const SizedBox(height: 10),
-                      //         itemBuilder: (context, index) {
-                      //           final log = _logs[index];
-                      //           return _LogTile(
-                      //             log: log,
-                      //             time: _formatTimestamp(log.timestamp),
-                      //           );
-                      //         },
-                      //       ),
-                      //     ),
-                      //   ),
-
-
-                    : ListView.separated(
-                          padding: const EdgeInsets.only(
-                              left: 16, right: 16, bottom: 16),
-                          itemCount: _logs.length,
-                          separatorBuilder: (_, __) =>
-                              const SizedBox(height: 10),
-                          itemBuilder: (context, index) {
-                            final log = _logs[index];
-                            return _LogTile(
-                              log: log,
-                              time: _formatTimestamp(log.timestamp),
-                            );
-                          },
-                        ),
-            ),
+        child: CustomScrollView(
+          slivers: [
+            SliverToBoxAdapter(child: _buildAnalyticsSection()),
+            SliverToBoxAdapter(child: _buildHistoryHeader()),
+            _buildLogsList(),
           ],
         ),
       ),
     );
   }
+
+  // ── Analytics section ──────────────────────────────────────────────────────
+
+  Widget _buildAnalyticsSection() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _buildAnalyticsHeader(),
+          const SizedBox(height: 12),
+          _buildRangeChips(),
+          const SizedBox(height: 12),
+          if (_analyticsTotal > 0) ...[
+            _buildStatRow(),
+            const SizedBox(height: 12),
+          ],
+          _buildSummaryCard(),
+          const SizedBox(height: 20),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildAnalyticsHeader() {
+    return Row(
+      children: [
+        const Text(
+          'Analytics',
+          style: TextStyle(
+            fontSize: 16,
+            fontWeight: FontWeight.w700,
+            color: AppTheme.textPrimary,
+          ),
+        ),
+        const Spacer(),
+        if (_summaryLoading)
+          const SizedBox(
+            width: 14,
+            height: 14,
+            child: CircularProgressIndicator(
+              strokeWidth: 2,
+              color: AppTheme.primary,
+            ),
+          )
+        else
+          GestureDetector(
+            onTap: _fetchAnalytics,
+            child: const Icon(Icons.refresh_rounded,
+                size: 20, color: AppTheme.textSecondary),
+          ),
+      ],
+    );
+  }
+
+  Widget _buildRangeChips() {
+    return Row(
+      children: _Range.values.map((range) {
+        final selected = range == _selectedRange;
+        return Padding(
+          padding: const EdgeInsets.only(right: 8),
+          child: GestureDetector(
+            onTap: () {
+              if (!selected) {
+                setState(() => _selectedRange = range);
+                _fetchAnalytics();
+              }
+            },
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 180),
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              decoration: BoxDecoration(
+                color: selected ? AppTheme.primary : Colors.transparent,
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(
+                  color: selected
+                      ? AppTheme.primary
+                      : const Color(0xFFD0C4A0),
+                ),
+              ),
+              child: Text(
+                range.label,
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: selected ? Colors.white : AppTheme.textSecondary,
+                ),
+              ),
+            ),
+          ),
+        );
+      }).toList(),
+    );
+  }
+
+  Widget _buildStatRow() {
+    final topDevice = _deviceCounts.entries.isEmpty
+        ? null
+        : (_deviceCounts.entries.toList()
+              ..sort((a, b) => b.value.compareTo(a.value)))
+            .first;
+
+    return Row(
+      children: [
+        _StatChip(
+          label: 'Total',
+          value: '$_analyticsTotal',
+          color: AppTheme.primary,
+        ),
+        const SizedBox(width: 8),
+        if (topDevice != null) ...[
+          _StatChip(
+            label: 'Top Device',
+            value: topDevice.key,
+            color: _deviceColor(topDevice.key),
+          ),
+          const SizedBox(width: 8),
+        ],
+        _StatChip(
+          label: 'Calibrations',
+          value: '$_calibrationCount',
+          color: Colors.purple.shade300,
+        ),
+      ],
+    );
+  }
+
+  Widget _buildSummaryCard() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFF483912), width: 1),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.05),
+            blurRadius: 6,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: _summaryLoading
+          ? const Center(
+              child: Padding(
+                padding: EdgeInsets.symmetric(vertical: 12),
+                child: Column(
+                  children: [
+                    CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: AppTheme.primary,
+                    ),
+                    SizedBox(height: 8),
+                    Text(
+                      'Generating summary…',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: AppTheme.textSecondary,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            )
+          : _summaryError != null
+              ? Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Could not load summary.',
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.red,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      _summaryError!,
+                      style: const TextStyle(
+                        fontSize: 11,
+                        color: AppTheme.textSecondary,
+                      ),
+                    ),
+                  ],
+                )
+              : Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        const Icon(Icons.auto_awesome_rounded,
+                            size: 14, color: AppTheme.primary),
+                        const SizedBox(width: 4),
+                        Text(
+                          'AI Summary · ${_selectedRange.label}',
+                          style: const TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                            color: AppTheme.primary,
+                            letterSpacing: 0.3,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      _summary ?? 'Tap refresh to generate a summary.',
+                      style: const TextStyle(
+                        fontSize: 13,
+                        color: AppTheme.textPrimary,
+                        height: 1.5,
+                      ),
+                    ),
+                  ],
+                ),
+    );
+  }
+
+  // ── History section ────────────────────────────────────────────────────────
+
+  Widget _buildHistoryHeader() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
+      child: Row(
+        children: [
+          const Text(
+            'History',
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w700,
+              color: AppTheme.textPrimary,
+            ),
+          ),
+          const Spacer(),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            decoration: BoxDecoration(
+              color: Colors.green.shade50,
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: Colors.green.shade300),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 6,
+                  height: 6,
+                  decoration: const BoxDecoration(
+                    color: Colors.green,
+                    shape: BoxShape.circle,
+                  ),
+                ),
+                const SizedBox(width: 4),
+                Text(
+                  'Live',
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: Colors.green.shade700,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  SliverList _buildLogsList() {
+    if (_logsLoading) {
+      return SliverList(
+        delegate: SliverChildListDelegate([
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 32),
+            child: Center(
+              child: CircularProgressIndicator(color: AppTheme.primary),
+            ),
+          ),
+        ]),
+      );
+    }
+
+    if (_logs.isEmpty) {
+      return SliverList(
+        delegate: SliverChildListDelegate([
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 32),
+            child: Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.history, size: 48, color: Colors.grey.shade300),
+                  const SizedBox(height: 12),
+                  const Text(
+                    'No logs yet.',
+                    style: TextStyle(
+                      color: AppTheme.textSecondary,
+                      fontSize: 13,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ]),
+      );
+    }
+
+    return SliverList(
+      delegate: SliverChildBuilderDelegate(
+        (context, index) {
+          if (index == _logs.length) {
+            return const SizedBox(height: 16);
+          }
+          final log = _logs[index];
+          return Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+            child: _LogTile(
+              log: log,
+              time: _formatTimestamp(log.timestamp),
+            ),
+          );
+        },
+        childCount: _logs.length + 1,
+      ),
+    );
+  }
 }
 
-class _RtdbLog {
-  final String message;
-  final int timestamp;
-  final String device;
-  final List<int>? calMin;
-  final List<int>? calMax;
+// ── Stat chip ─────────────────────────────────────────────────────────────────
 
-  const _RtdbLog({
-    required this.message,
-    required this.timestamp,
-    required this.device,
-    this.calMin,
-    this.calMax,
+class _StatChip extends StatelessWidget {
+  final String label;
+  final String value;
+  final Color color;
+
+  const _StatChip({
+    required this.label,
+    required this.value,
+    required this.color,
   });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: color.withValues(alpha: 0.3)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            value,
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w800,
+              color: color == AppTheme.primary ? AppTheme.primary : color,
+            ),
+          ),
+          Text(
+            label,
+            style: const TextStyle(
+              fontSize: 10,
+              color: AppTheme.textSecondary,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }
+
+// ── Log tile ──────────────────────────────────────────────────────────────────
 
 class _LogTile extends StatefulWidget {
   final _RtdbLog log;
   final String time;
- 
+
   const _LogTile({required this.log, required this.time});
- 
+
   @override
   State<_LogTile> createState() => _LogTileState();
 }
- 
+
 class _LogTileState extends State<_LogTile>
     with SingleTickerProviderStateMixin {
   late final AnimationController _ctrl;
   late final Animation<double> _expandAnim;
   bool _expanded = false;
- 
+
   @override
   void initState() {
     super.initState();
@@ -288,44 +697,44 @@ class _LogTileState extends State<_LogTile>
     );
     _expandAnim = CurvedAnimation(parent: _ctrl, curve: Curves.easeInOut);
   }
- 
+
   @override
   void dispose() {
     _ctrl.dispose();
     super.dispose();
   }
- 
+
   void _toggle() {
     setState(() => _expanded = !_expanded);
     _expanded ? _ctrl.forward() : _ctrl.reverse();
   }
- 
+
   String _icon() {
     switch (widget.log.device) {
-      case 'tv':
+      case 'TV':
         return _tvIcon;
-      case 'fan':
+      case 'Fan':
         return _fanIcon;
-      case 'light':
+      case 'Light':
         return _lightIcon;
       default:
         return AppIcons.chartLine;
     }
   }
- 
+
   Color _color() {
     switch (widget.log.device) {
-      case 'tv':
+      case 'TV':
         return const Color(0xFFF5A623);
-      case 'fan':
+      case 'Fan':
         return const Color(0xFF29B6F6);
-      case 'light':
+      case 'Light':
         return const Color(0xFFF5A623);
       default:
         return AppTheme.primary;
     }
   }
- 
+
   @override
   Widget build(BuildContext context) {
     final color = _color();
@@ -333,7 +742,7 @@ class _LogTileState extends State<_LogTile>
         widget.log.calMax != null &&
         widget.log.calMin!.length == 5 &&
         widget.log.calMax!.length == 5;
- 
+
     return Container(
       decoration: BoxDecoration(
         color: Colors.white,
@@ -350,7 +759,6 @@ class _LogTileState extends State<_LogTile>
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          // ── Header row (always visible) ──────────────────────────────────
           InkWell(
             onTap: hasCalibration ? _toggle : null,
             borderRadius: BorderRadius.circular(12),
@@ -359,23 +767,20 @@ class _LogTileState extends State<_LogTile>
                   const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
               child: Row(
                 children: [
-                  // Device icon box
                   Container(
                     width: 42,
                     height: 42,
                     decoration: BoxDecoration(
                       color: color.withValues(alpha: 0.12),
                       borderRadius: BorderRadius.circular(10),
-                      border:
-                          Border.all(color: const Color(0xFF483912), width: 1),
+                      border: Border.all(
+                          color: const Color(0xFF483912), width: 1),
                     ),
                     child: Center(
                       child: Iconify(_icon(), color: color, size: 22),
                     ),
                   ),
                   const SizedBox(width: 12),
- 
-                  // Label — takes all remaining space before timestamp
                   Expanded(
                     child: Text(
                       widget.log.message,
@@ -389,8 +794,6 @@ class _LogTileState extends State<_LogTile>
                     ),
                   ),
                   const SizedBox(width: 8),
- 
-                  // Timestamp + optional chevron
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.end,
                     mainAxisSize: MainAxisSize.min,
@@ -407,7 +810,7 @@ class _LogTileState extends State<_LogTile>
                         const SizedBox(height: 4),
                         AnimatedBuilder(
                           animation: _expandAnim,
-                          builder: (_, __) => Transform.rotate(
+                          builder: (_, _) => Transform.rotate(
                             angle: _expandAnim.value * 3.14159,
                             child: Icon(
                               Icons.keyboard_arrow_down_rounded,
@@ -423,8 +826,6 @@ class _LogTileState extends State<_LogTile>
               ),
             ),
           ),
- 
-          // ── Expandable calibration panel ─────────────────────────────────
           if (hasCalibration)
             SizeTransition(
               sizeFactor: _expandAnim,
@@ -468,29 +869,30 @@ class _LogTileState extends State<_LogTile>
   }
 }
 
+// ── Calibration table ─────────────────────────────────────────────────────────
+
 class _CalTable extends StatelessWidget {
   final List<int> calMin;
   final List<int> calMax;
   final Color color;
- 
+
   const _CalTable({
     required this.calMin,
     required this.calMax,
     required this.color,
   });
- 
+
   @override
   Widget build(BuildContext context) {
     return Table(
       defaultVerticalAlignment: TableCellVerticalAlignment.middle,
       columnWidths: const {
-        0: IntrinsicColumnWidth(), // label column
+        0: IntrinsicColumnWidth(),
       },
       children: [
-        // Header row — finger names
         TableRow(
           children: [
-            const SizedBox(), // empty corner above label col
+            const SizedBox(),
             ..._fingerLabels.map(
               (f) => Padding(
                 padding: const EdgeInsets.only(bottom: 4),
@@ -507,14 +909,12 @@ class _CalTable extends StatelessWidget {
             ),
           ],
         ),
-        // Min row
         _buildRow('Min', calMin, color),
-        // Max row
         _buildRow('Max', calMax, color),
       ],
     );
   }
- 
+
   TableRow _buildRow(String label, List<int> values, Color labelColor) {
     return TableRow(
       decoration: BoxDecoration(
