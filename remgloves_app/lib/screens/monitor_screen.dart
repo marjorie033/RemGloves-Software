@@ -1,25 +1,122 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:iconify_flutter/iconify_flutter.dart';
+import '../services/mqtt_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_bar.dart';
 import '../widgets/rounded_body.dart';
 
-// SVG icon strings
 const String _lightIcon = '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><path fill="currentColor" d="M12 2a7 7 0 0 1 7 7c0 2.38-1.19 4.47-3 5.74V17a1 1 0 0 1-1 1H9a1 1 0 0 1-1-1v-2.26C6.19 13.47 5 11.38 5 9a7 7 0 0 1 7-7m3 18v1a1 1 0 0 1-1 1h-4a1 1 0 0 1-1-1v-1h6m-1-3H9v-1.97l.67-.41A5 5 0 0 0 12 4a5 5 0 0 0-5 5c0 1.88 1.04 3.56 2.67 4.44l.33.19V16h4v-.38l.33-.19A5.52 5.52 0 0 0 17 12.19V15z"/></svg>';
-const String _fanIcon = '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><path fill="currentColor" d="M12 11a1 1 0 0 0-1 1a1 1 0 0 0 1 1a1 1 0 0 0 1-1a1 1 0 0 0-1-1m.5-9c4.5 0 4.61 3.57 2.25 4.75c-.99.49-1.43 1.54-1.62 2.47c.48.2.9.51 1.22.91c3.7-2 7.68-1.21 7.68 2.37c0 4.5-3.57 4.6-4.75 2.23c-.5-.99-1.56-1.43-2.49-1.62c-.2.48-.51.89-.91 1.23c1.99 3.69 1.2 7.66-2.38 7.66c-4.5 0-4.59-3.58-2.23-4.76c.98-.49 1.42-1.53 1.62-2.45c-.49-.2-.92-.52-1.24-.92C5.96 15.85 2 15.07 2 11.5C2 7 5.56 6.89 6.74 9.26c.5.99 1.55 1.42 2.48 1.61c.19-.48.51-.9.92-1.22C8.15 5.96 8.94 2 12.5 2"/></svg>';
-const String _tvIcon = '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><path fill="currentColor" d="M21 17H3V5h18m0-2H3c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h5v2h8v-2h5c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2z"/></svg>';
+const String _fanIcon   = '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><path fill="currentColor" d="M12 11a1 1 0 0 0-1 1a1 1 0 0 0 1 1a1 1 0 0 0 1-1a1 1 0 0 0-1-1m.5-9c4.5 0 4.61 3.57 2.25 4.75c-.99.49-1.43 1.54-1.62 2.47c.48.2.9.51 1.22.91c3.7-2 7.68-1.21 7.68 2.37c0 4.5-3.57 4.6-4.75 2.23c-.5-.99-1.56-1.43-2.49-1.62c-.2.48-.51.89-.91 1.23c1.99 3.69 1.2 7.66-2.38 7.66c-4.5 0-4.59-3.58-2.23-4.76c.98-.49 1.42-1.53 1.62-2.45c-.49-.2-.92-.52-1.24-.92C5.96 15.85 2 15.07 2 11.5C2 7 5.56 6.89 6.74 9.26c.5.99 1.55 1.42 2.48 1.61c.19-.48.51-.9.92-1.22C8.15 5.96 8.94 2 12.5 2"/></svg>';
+const String _tvIcon    = '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><path fill="currentColor" d="M21 17H3V5h18m0-2H3c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h5v2h8v-2h5c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2z"/></svg>';
 
 class MonitorScreen extends StatefulWidget {
-  const MonitorScreen({super.key});
+  final MqttService mqttService;
+
+  const MonitorScreen({super.key, required this.mqttService});
 
   @override
   State<MonitorScreen> createState() => _MonitorScreenState();
 }
 
 class _MonitorScreenState extends State<MonitorScreen> {
-  bool _lightOn = false;
-  bool _fanOn = true;
-  bool _tvOn = true;
+  bool _lightOn      = false;
+  bool _lightPending = false;
+  Timer? _lightRollbackTimer;
+
+  bool _fanOn      = false;
+  bool _fanPending = false;
+  Timer? _fanRollbackTimer;
+
+  final bool _tvOn = false;
+  bool _connected  = false;
+
+  StreamSubscription<bool>?    _lightSub;
+  StreamSubscription<bool>?    _fanSub;
+  StreamSubscription<bool>?    _connSub;
+  StreamSubscription<String?>? _errorSub;
+  String? _mqttError;
+
+  @override
+  void initState() {
+    super.initState();
+    _connected = widget.mqttService.isConnected;
+    _lightOn   = widget.mqttService.lightOn;
+    _fanOn     = widget.mqttService.fanOn;
+
+    _lightSub = widget.mqttService.lightStateStream.listen((on) {
+      _lightRollbackTimer?.cancel();
+      _lightRollbackTimer = null;
+      setState(() {
+        _lightOn      = on;
+        _lightPending = false;
+      });
+    });
+
+    _fanSub = widget.mqttService.fanStateStream.listen((on) {
+      _fanRollbackTimer?.cancel();
+      _fanRollbackTimer = null;
+      setState(() {
+        _fanOn      = on;
+        _fanPending = false;
+      });
+    });
+
+    _connSub = widget.mqttService.connectionStream.listen(
+      (connected) => setState(() => _connected = connected),
+    );
+
+    _errorSub = widget.mqttService.errorStream.listen(
+      (err) => setState(() => _mqttError = err),
+    );
+  }
+
+  @override
+  void dispose() {
+    _lightSub?.cancel();
+    _fanSub?.cancel();
+    _connSub?.cancel();
+    _errorSub?.cancel();
+    _lightRollbackTimer?.cancel();
+    _fanRollbackTimer?.cancel();
+    super.dispose();
+  }
+
+  void _toggleLight(bool v) {
+    if (_lightPending) return;
+    _lightRollbackTimer?.cancel();
+    setState(() {
+      _lightOn      = v;
+      _lightPending = true;
+    });
+    widget.mqttService.publishLightControl(v ? 'ON' : 'OFF');
+    _lightRollbackTimer = Timer(const Duration(seconds: 5), () {
+      if (mounted) {
+        setState(() {
+          _lightOn      = !v;
+          _lightPending = false;
+        });
+      }
+    });
+  }
+
+  void _toggleFan(bool v) {
+    if (_fanPending) return;
+    _fanRollbackTimer?.cancel();
+    setState(() {
+      _fanOn      = v;
+      _fanPending = true;
+    });
+    widget.mqttService.publishFanControl(v ? 'ON' : 'OFF');
+    _fanRollbackTimer = Timer(const Duration(seconds: 5), () {
+      if (mounted) {
+        setState(() {
+          _fanOn      = !v;
+          _fanPending = false;
+        });
+      }
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -31,44 +128,119 @@ class _MonitorScreenState extends State<MonitorScreen> {
           padding: const EdgeInsets.all(16),
           children: [
             const SizedBox(height: 4),
-            const Text(
-              'Live Device Status',
-              style: TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.w700,
-                color: AppTheme.textPrimary,
-              ),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text(
+                  'Live Device Status',
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w700,
+                    color: AppTheme.textPrimary,
+                  ),
+                ),
+                _ConnectionBadge(connected: _connected),
+              ],
             ),
+            if (!_connected && _mqttError != null) ...[
+              const SizedBox(height: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFFF3CD),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: const Color(0xFFFFCA28)),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.warning_amber_rounded,
+                        size: 16, color: Color(0xFFF9A825)),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'MQTT error: $_mqttError',
+                        style: const TextStyle(
+                          fontSize: 11,
+                          color: Color(0xFF5D4037),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
             const SizedBox(height: 14),
             _DeviceTile(
               svgIcon: _lightIcon,
               iconColor: const Color(0xFFF5A623),
               label: 'Smart Light',
-              subtitle: _lightOn ? 'Device is ON' : 'Device is OFF',
+              subtitle: _lightPending
+                  ? 'Updating...'
+                  : (_lightOn ? 'Device is ON' : 'Device is OFF'),
               value: _lightOn,
-              onChanged: (v) => setState(() => _lightOn = v),
+              pending: _lightPending,
+              onChanged: _toggleLight,
             ),
             const SizedBox(height: 10),
             _DeviceTile(
               svgIcon: _fanIcon,
               iconColor: const Color(0xFF29B6F6),
               label: 'Smart Fan',
-              subtitle: _fanOn ? 'Device is ON' : 'Device is OFF',
+              subtitle: _fanPending
+                  ? 'Updating...'
+                  : (_fanOn ? 'Device is ON' : 'Device is OFF'),
               value: _fanOn,
-              onChanged: (v) => setState(() => _fanOn = v),
+              pending: _fanPending,
+              onChanged: _toggleFan,
             ),
             const SizedBox(height: 10),
             _DeviceTile(
               svgIcon: _tvIcon,
               iconColor: const Color(0xFFF5A623),
               label: 'Smart TV',
-              subtitle: _tvOn ? 'Device is ON' : 'Device is OFF',
+              subtitle: 'Coming soon',
               value: _tvOn,
-              onChanged: (v) => setState(() => _tvOn = v),
+              pending: false,
+              onChanged: null,
             ),
           ],
         ),
       ),
+    );
+  }
+}
+
+class _ConnectionBadge extends StatelessWidget {
+  final bool connected;
+  const _ConnectionBadge({required this.connected});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 8,
+          height: 8,
+          decoration: BoxDecoration(
+            color: connected
+                ? const Color(0xFF4CAF50)
+                : const Color(0xFFBDBDBD),
+            shape: BoxShape.circle,
+          ),
+        ),
+        const SizedBox(width: 5),
+        Text(
+          connected ? 'Connected' : 'Disconnected',
+          style: TextStyle(
+            fontSize: 11,
+            fontWeight: FontWeight.w500,
+            color: connected
+                ? const Color(0xFF4CAF50)
+                : AppTheme.textSecondary,
+          ),
+        ),
+      ],
     );
   }
 }
@@ -79,7 +251,8 @@ class _DeviceTile extends StatelessWidget {
   final String label;
   final String subtitle;
   final bool value;
-  final ValueChanged<bool> onChanged;
+  final bool pending;
+  final ValueChanged<bool>? onChanged;
 
   const _DeviceTile({
     required this.svgIcon,
@@ -87,69 +260,75 @@ class _DeviceTile extends StatelessWidget {
     required this.label,
     required this.subtitle,
     required this.value,
+    required this.pending,
     required this.onChanged,
   });
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: const Color(0xFF483912), width: 1),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 42,
-            height: 42,
-            decoration: BoxDecoration(
-              color: iconColor.withOpacity(0.12),
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: const Color(0xFF483912), width: 1),
+    final bool disabled = onChanged == null;
+
+    return Opacity(
+      opacity: disabled ? 0.45 : 1.0,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: const Color(0xFF483912), width: 1),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.05),
+              blurRadius: 8,
+              offset: const Offset(0, 2),
             ),
-            child: Center(
-              child: Iconify(
-                svgIcon,
-                color: iconColor,
-                size: 22,
+          ],
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 42,
+              height: 42,
+              decoration: BoxDecoration(
+                color: iconColor.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: const Color(0xFF483912), width: 1),
+              ),
+              child: Center(
+                child: Iconify(svgIcon, color: iconColor, size: 22),
               ),
             ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  label,
-                  style: const TextStyle(
-                    fontWeight: FontWeight.w600,
-                    fontSize: 14,
-                    color: AppTheme.textPrimary,
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    label,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w600,
+                      fontSize: 14,
+                      color: AppTheme.textPrimary,
+                    ),
                   ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  subtitle,
-                  style: const TextStyle(
-                    fontSize: 11,
-                    color: AppTheme.textSecondary,
+                  const SizedBox(height: 2),
+                  Text(
+                    subtitle,
+                    style: const TextStyle(
+                      fontSize: 11,
+                      color: AppTheme.textSecondary,
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
-          ),
-          _CustomToggle(value: value, onChanged: onChanged),
-        ],
+            _CustomToggle(
+              value: value,
+              pending: pending,
+              onChanged: onChanged,
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -157,21 +336,32 @@ class _DeviceTile extends StatelessWidget {
 
 class _CustomToggle extends StatelessWidget {
   final bool value;
-  final ValueChanged<bool> onChanged;
+  final bool pending;
+  final ValueChanged<bool>? onChanged;
 
-  const _CustomToggle({required this.value, required this.onChanged});
+  const _CustomToggle({
+    required this.value,
+    required this.pending,
+    required this.onChanged,
+  });
 
   @override
   Widget build(BuildContext context) {
+    final bool interactive = onChanged != null && !pending;
+
+    final Color bgColor = pending
+        ? const Color(0xFFFFC107)
+        : (value ? AppTheme.toggleOn : const Color(0xFFDDDDDD));
+
     return GestureDetector(
-      onTap: () => onChanged(!value),
+      onTap: interactive ? () => onChanged!(!value) : null,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 200),
         width: 52,
         height: 28,
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(14),
-          color: value ? AppTheme.toggleOn : const Color(0xFFDDDDDD),
+          color: bgColor,
         ),
         child: Stack(
           children: [
@@ -186,23 +376,41 @@ class _CustomToggle extends StatelessWidget {
                   color: Colors.white,
                   shape: BoxShape.circle,
                   boxShadow: [
-                    BoxShadow(color: Colors.black26, blurRadius: 4, offset: Offset(0, 1)),
+                    BoxShadow(
+                      color: Colors.black26,
+                      blurRadius: 4,
+                      offset: Offset(0, 1),
+                    ),
                   ],
                 ),
               ),
             ),
             Center(
-              child: Padding(
-                padding: EdgeInsets.only(left: value ? 0 : 16, right: value ? 16 : 0),
-                child: Text(
-                  value ? 'ON' : 'OFF',
-                  style: TextStyle(
-                    color: value ? Colors.white : AppTheme.textSecondary,
-                    fontSize: 9,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ),
+              child: pending
+                  ? const SizedBox(
+                      width: 14,
+                      height: 14,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 1.5,
+                        color: Colors.white,
+                      ),
+                    )
+                  : Padding(
+                      padding: EdgeInsets.only(
+                        left: value ? 0 : 16,
+                        right: value ? 16 : 0,
+                      ),
+                      child: Text(
+                        value ? 'ON' : 'OFF',
+                        style: TextStyle(
+                          color: value
+                              ? Colors.white
+                              : AppTheme.textSecondary,
+                          fontSize: 9,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
             ),
           ],
         ),
