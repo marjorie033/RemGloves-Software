@@ -8,20 +8,11 @@ import '../widgets/app_bar.dart';
 import '../widgets/rounded_body.dart';
 import '../services/ai_summary_service.dart';
 
-const String _tvIcon =
-    '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">'
-    '<path fill="currentColor" d="M21 17H3V5h18m0-2H3c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h5v2h8v-2h5c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2z"/>'
-    '</svg>';
+const String _tvIcon = AppIcons.tv;
 
-const String _fanIcon =
-    '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">'
-    '<path fill="currentColor" d="M12 11a1 1 0 0 0-1 1a1 1 0 0 0 1 1a1 1 0 0 0 1-1a1 1 0 0 0-1-1m.5-9c4.5 0 4.61 3.57 2.25 4.75c-.99.49-1.43 1.54-1.62 2.47c.48.2.9.51 1.22.91c3.7-2 7.68-1.21 7.68 2.37c0 4.5-3.57 4.6-4.75 2.23c-.5-.99-1.56-1.43-2.49-1.62c-.2.48-.51.89-.91 1.23c1.99 3.69 1.2 7.66-2.38 7.66c-4.5 0-4.59-3.58-2.23-4.76c.98-.49 1.42-1.53 1.62-2.45c-.49-.2-.92-.52-1.24-.92C5.96 15.85 2 15.07 2 11.5C2 7 5.56 6.89 6.74 9.26c.5.99 1.55 1.42 2.48 1.61c.19-.48.51-.9.92-1.22C8.15 5.96 8.94 2 12.5 2"/>'
-    '</svg>';
+const String _fanIcon = AppIcons.fan;
 
-const String _lightIcon =
-    '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">'
-    '<path fill="currentColor" d="M12 2a7 7 0 0 1 7 7c0 2.38-1.19 4.47-3 5.74V17a1 1 0 0 1-1 1H9a1 1 0 0 1-1-1v-2.26C6.19 13.47 5 11.38 5 9a7 7 0 0 1 7-7m3 18v1a1 1 0 0 1-1 1h-4a1 1 0 0 1-1-1v-1h6m-1-3H9v-1.97l.67-.41A5 5 0 0 0 12 4a5 5 0 0 0-5 5c0 1.88 1.04 3.56 2.67 4.44l.33.19V16h4v-.38l.33-.19A5.52 5.52 0 0 0 17 12.19V15z"/>'
-    '</svg>';
+const String _lightIcon = AppIcons.lightbulb;
 
 const _fingerLabels = ['Thumb', 'Index', 'Middle', 'Ring', 'Pinky'];
 
@@ -432,12 +423,12 @@ class _LogsScreenState extends State<LogsScreen> {
               padding:
                   const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
               decoration: BoxDecoration(
-                color: selected ? AppTheme.primary : Colors.transparent,
+                color: selected ? AppTheme.primary : Colors.white,
                 borderRadius: BorderRadius.circular(20),
                 border: Border.all(
                   color: selected
                       ? AppTheme.primary
-                      : const Color(0xFFD0C4A0),
+                      : AppTheme.textPrimary,
                 ),
               ),
               child: Text(
@@ -496,7 +487,7 @@ class _LogsScreenState extends State<LogsScreen> {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0xFF483912), width: 1),
+        border: Border.all(color: Color(0xFF483912), width: 1),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withValues(alpha: 0.05),

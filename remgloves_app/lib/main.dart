@@ -96,7 +96,7 @@ class _BottomNavBar extends StatelessWidget {
       _NavItem(icon: AppIcons.monitor,    activeIcon: AppIcons.monitor,    label: 'Monitor'),
       _NavItem(icon: AppIcons.cube3d,     activeIcon: AppIcons.cube3d,     label: '3D Sim'),
       _NavItem(icon: AppIcons.chartLine,  activeIcon: AppIcons.chartLine,  label: 'Logs'),
-      _NavItem(icon: AppIcons.settingsGear, activeIcon: AppIcons.settingsGear, label: 'Settings'),
+      _NavItem(icon: AppIcons.userperson, activeIcon: AppIcons.userperson, label: 'Account'),
     ];
 
     return Container(

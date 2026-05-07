@@ -326,7 +326,7 @@ class _SimulationScreenState extends State<SimulationScreen> {
                 color: AppTheme.primary.withValues(alpha: 0.12),
                 borderRadius: BorderRadius.circular(9),
                 border: Border.all(
-                    color: const Color(0xFF483912).withValues(alpha: 0.2)),
+                    color: const Color(0xFF483912)),
               ),
               child: const Icon(Icons.gesture, color: AppTheme.primary, size: 18),
             ),
@@ -422,7 +422,8 @@ class _SimulationScreenState extends State<SimulationScreen> {
                 color: AppTheme.primary.withValues(alpha: 0.12),
                 borderRadius: BorderRadius.circular(9),
                 border: Border.all(
-                    color: const Color(0xFF483912).withValues(alpha: 0.2)),
+                    // color: const Color(0xFF483912).withValues(alpha: 0.2)),
+                    color: const Color(0xFF483912)),
               ),
               child: const Icon(Icons.pan_tool_outlined,
                   color: AppTheme.primary, size: 18),
