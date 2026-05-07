@@ -11,7 +11,9 @@ import '../widgets/app_bar.dart';
 import '../widgets/rounded_body.dart';
 
 class SimulationScreen extends StatefulWidget {
-  const SimulationScreen({super.key});
+  final BleService ble;
+
+  const SimulationScreen({super.key, required this.ble});
 
   @override
   State<SimulationScreen> createState() => _SimulationScreenState();
@@ -36,7 +38,7 @@ class _SimulationScreenState extends State<SimulationScreen> {
   };
 
   // ── BLE ───────────────────────────────────────────────────────────────────
-  final _ble = BleService();
+  BleService get _ble => widget.ble;
   BleStatus _bleStatus = BleStatus.idle;
   int _gestureCode = 0;
   StreamSubscription<GloveData>? _dataSub;
@@ -56,7 +58,6 @@ class _SimulationScreenState extends State<SimulationScreen> {
   void dispose() {
     _dataSub?.cancel();
     _statusSub?.cancel();
-    _ble.dispose();
     super.dispose();
   }
 

@@ -5,7 +5,14 @@
       "PowerShell(Stop-Process -Force)",
       "Bash(git add *)",
       "Bash(git commit -m ' *)",
-      "Bash(git push *)"
+      "Bash(git push *)",
+      "Bash(Get-ChildItem -Path \"d:\\\\CIT\\\\Development\\\\Projects\\\\RemGloves-Software\\\\remgloves_app\\\\lib\" -Recurse)",
+      "Bash(Select-Object FullName)",
+      "Bash(ConvertTo-Csv -NoTypeInformation)",
+      "Bash(Select-Object -Skip 1)",
+      "Bash(Sort-Object)",
+      "Bash(xargs wc -l)",
+      "Bash(flutter pub *)"
     ]
   }
 }

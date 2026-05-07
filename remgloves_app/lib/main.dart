@@ -7,7 +7,10 @@ import 'screens/monitor_screen.dart';
 import 'screens/simulation_screen.dart';
 import 'screens/logs_screen.dart';
 import 'screens/settings_screen.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'services/mqtt_service.dart';
+import 'services/ble_service.dart';
+import 'services/gesture_log_service.dart';
 import 'theme/app_theme.dart';
 import 'theme/app_icons.dart';
 
@@ -48,6 +51,8 @@ class MainShell extends StatefulWidget {
 class _MainShellState extends State<MainShell> {
   int _currentIndex = 0;
   late final MqttService _mqttService;
+  late final BleService _bleService;
+  late final GestureLogService _gestureLogService;
   late final List<Widget> _screens;
 
   @override
@@ -55,17 +60,29 @@ class _MainShellState extends State<MainShell> {
     super.initState();
     _mqttService = MqttService();
     _mqttService.connect();
+    _bleService = BleService();
+    _gestureLogService = GestureLogService(_bleService);
     _screens = [
       MonitorScreen(mqttService: _mqttService),
-      const SimulationScreen(),
+      SimulationScreen(ble: _bleService),
       const LogsScreen(),
-      const SettingsScreen(),
+      SettingsScreen(ble: _bleService),
     ];
+    _autoConnectIfEnabled();
+  }
+
+  Future<void> _autoConnectIfEnabled() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (prefs.getBool('auto_connect_glove') ?? false) {
+      _bleService.connect();
+    }
   }
 
   @override
   void dispose() {
     _mqttService.dispose();
+    _gestureLogService.dispose();
+    _bleService.dispose();
     super.dispose();
   }
 
@@ -96,7 +113,7 @@ class _BottomNavBar extends StatelessWidget {
       _NavItem(icon: AppIcons.monitor,    activeIcon: AppIcons.monitor,    label: 'Monitor'),
       _NavItem(icon: AppIcons.cube3d,     activeIcon: AppIcons.cube3d,     label: '3D Sim'),
       _NavItem(icon: AppIcons.chartLine,  activeIcon: AppIcons.chartLine,  label: 'Logs'),
-      _NavItem(icon: AppIcons.userperson, activeIcon: AppIcons.userperson, label: 'Account'),
+      _NavItem(icon: AppIcons.more, activeIcon: AppIcons.more, label: 'More'),
     ];
 
     return Container(
