@@ -12,7 +12,7 @@ class AppTheme {
   static const Color connectionbox = Color(0xFF36FF8A);
   static const Color defaultnavicon = Color(0xFFAFA898);
   static const Color logotext = Color(0xFF483912);
-
+  static const Color secondary = Color(0xFF483912);
 
   static ThemeData get lightTheme {
     return ThemeData(

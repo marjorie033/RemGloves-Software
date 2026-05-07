@@ -6,6 +6,7 @@ import '../theme/app_theme.dart';
 import '../widgets/app_bar.dart';
 import '../widgets/rounded_body.dart';
 import '../theme/app_icons.dart';
+import '../widgets/connect-glove-dialog.dart';
 
 const String _lightIcon = AppIcons.lightbulb;
 const String _fanIcon   = AppIcons.fan;
@@ -70,6 +71,12 @@ class _MonitorScreenState extends State<MonitorScreen> {
     _errorSub = widget.mqttService.errorStream.listen(
       (err) => setState(() => _mqttError = err),
     );
+    
+     if (!_connected) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      showConnectGloveDialog(context);
+    });
+  }
   }
 
   @override
