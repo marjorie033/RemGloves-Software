@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:iconify_flutter/iconify_flutter.dart';
+import '../services/ble_service.dart';
 import '../services/mqtt_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_bar.dart';
@@ -14,8 +15,9 @@ const String _tvIcon    = AppIcons.tv;
 
 class MonitorScreen extends StatefulWidget {
   final MqttService mqttService;
+  final BleService ble;
 
-  const MonitorScreen({super.key, required this.mqttService});
+  const MonitorScreen({super.key, required this.mqttService, required this.ble});
 
   @override
   State<MonitorScreen> createState() => _MonitorScreenState();
@@ -74,7 +76,7 @@ class _MonitorScreenState extends State<MonitorScreen> {
     
      if (!_connected) {
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      showConnectGloveDialog(context);
+      showConnectGloveDialog(context, widget.ble);
     });
   }
   }
@@ -129,7 +131,7 @@ class _MonitorScreenState extends State<MonitorScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: const RemGloveAppBar(),
+      appBar: RemGloveAppBar(ble: widget.ble),
       backgroundColor: AppTheme.primary,
       body: RoundedBody(
         child: ListView(

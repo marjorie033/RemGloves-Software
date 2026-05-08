@@ -63,9 +63,9 @@ class _MainShellState extends State<MainShell> {
     _bleService = BleService();
     _gestureLogService = GestureLogService(_bleService);
     _screens = [
-      MonitorScreen(mqttService: _mqttService),
+      MonitorScreen(mqttService: _mqttService, ble: _bleService),
       SimulationScreen(ble: _bleService),
-      const LogsScreen(),
+      LogsScreen(ble: _bleService),
       SettingsScreen(ble: _bleService),
     ];
     _autoConnectIfEnabled();

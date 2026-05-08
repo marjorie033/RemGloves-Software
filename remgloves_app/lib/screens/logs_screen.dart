@@ -4,6 +4,7 @@ import 'package:firebase_database/firebase_database.dart';
 import 'package:iconify_flutter/iconify_flutter.dart';
 import '../theme/app_icons.dart';
 import '../theme/app_theme.dart';
+import '../services/ble_service.dart';
 import '../widgets/app_bar.dart';
 import '../widgets/rounded_body.dart';
 import '../services/ai_summary_service.dart';
@@ -116,7 +117,9 @@ class _SummaryCache {
 // ── Screen ────────────────────────────────────────────────────────────────────
 
 class LogsScreen extends StatefulWidget {
-  const LogsScreen({super.key});
+  final BleService ble;
+
+  const LogsScreen({super.key, required this.ble});
 
   @override
   State<LogsScreen> createState() => _LogsScreenState();
@@ -335,7 +338,7 @@ class _LogsScreenState extends State<LogsScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: const RemGloveAppBar(),
+      appBar: RemGloveAppBar(ble: widget.ble),
       backgroundColor: AppTheme.primary,
       body: RoundedBody(
         child: CustomScrollView(

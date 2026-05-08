@@ -58,7 +58,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: const RemGloveAppBar(),
+      appBar: RemGloveAppBar(ble: widget.ble),
       backgroundColor: AppTheme.primary,
       body: RoundedBody(
         child: Column(

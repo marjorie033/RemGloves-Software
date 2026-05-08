@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:iconify_flutter/iconify_flutter.dart';
+import '../services/ble_service.dart';
 import '../theme/app_theme.dart';
 import '../theme/app_icons.dart';
 
@@ -28,19 +29,21 @@ class GloveDevice {
 
 // ── Public helper ─────────────────────────────────────────────────────────────
 
-Future<void> showConnectGloveDialog(BuildContext context) {
+Future<void> showConnectGloveDialog(BuildContext context, BleService ble) {
   return showDialog(
     context: context,
     barrierDismissible: false,
     barrierColor: Colors.black.withOpacity(0.45),
-    builder: (_) => const _ConnectGloveDialog(),
+    builder: (_) => _ConnectGloveDialog(ble: ble),
   );
 }
 
 // ── Dialog ────────────────────────────────────────────────────────────────────
 
 class _ConnectGloveDialog extends StatefulWidget {
-  const _ConnectGloveDialog();
+  final BleService ble;
+
+  const _ConnectGloveDialog({required this.ble});
 
   @override
   State<_ConnectGloveDialog> createState() => _ConnectGloveDialogState();
@@ -50,7 +53,7 @@ class _ConnectGloveDialogState extends State<_ConnectGloveDialog>
     with TickerProviderStateMixin {
   GloveConnectState _state = GloveConnectState.scanning;
   GloveDevice? _selectedDevice;
-  Timer? _scanTimeoutTimer;
+  StreamSubscription<BleStatus>? _bleSub;
 
   late final List<AnimationController> _ringCtls;
   late final List<Animation<double>> _ringScales;
@@ -107,23 +110,41 @@ class _ConnectGloveDialogState extends State<_ConnectGloveDialog>
       });
     }
 
-    _startScanTimeout();
+    // Subscribe to real BLE status and kick off a scan if needed.
+    _bleSub = widget.ble.statusStream.listen(_onBleStatus);
+    final current = widget.ble.status;
+    if (current == BleStatus.idle ||
+        current == BleStatus.disconnected ||
+        current == BleStatus.error) {
+      widget.ble.connect();
+    } else {
+      _onBleStatus(current);
+    }
   }
 
   @override
   void dispose() {
-    _scanTimeoutTimer?.cancel();
+    _bleSub?.cancel();
     for (final c in _ringCtls) c.dispose();
     for (final c in _dotCtls) c.dispose();
     super.dispose();
   }
 
-  void _startScanTimeout() {
-    _scanTimeoutTimer?.cancel();
-    _scanTimeoutTimer = Timer(const Duration(seconds: 20), () {
-      if (mounted && _state == GloveConnectState.scanning) {
-        _pauseRings();
-        setState(() => _state = GloveConnectState.nothingFound);
+  void _onBleStatus(BleStatus status) {
+    if (!mounted) return;
+    setState(() {
+      switch (status) {
+        case BleStatus.scanning:
+        case BleStatus.connecting:
+          _state = GloveConnectState.scanning;
+        case BleStatus.connected:
+          _state = GloveConnectState.connected;
+          _pauseRings();
+        case BleStatus.disconnected:
+        case BleStatus.error:
+        case BleStatus.idle:
+          _state = GloveConnectState.nothingFound;
+          _pauseRings();
       }
     });
   }
@@ -144,7 +165,7 @@ class _ConnectGloveDialogState extends State<_ConnectGloveDialog>
       _selectedDevice = null;
     });
     _resumeRings();
-    _startScanTimeout();
+    widget.ble.connect();
   }
 
   // ── Build ──────────────────────────────────────────────────────────────────
@@ -249,7 +270,7 @@ class _ConnectGloveDialogState extends State<_ConnectGloveDialog>
 
     final String label = switch (_state) {
       GloveConnectState.scanning     => 'Searching for gloves',
-      GloveConnectState.found        => '${_mockDevices.length} gloves detected',
+      GloveConnectState.found        => 'Glove detected',
       GloveConnectState.nothingFound => 'No gloves found',
       GloveConnectState.connected    => 'Connected',
     };
