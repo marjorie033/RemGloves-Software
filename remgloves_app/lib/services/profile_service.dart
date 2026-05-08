@@ -4,9 +4,40 @@ import '../models/calibration_data.dart';
 import '../models/glove_profile.dart';
 
 class ProfileService {
-  static const _prefsKey = 'glove_profiles_v1';
+  static const _prefsKey    = 'glove_profiles_v1';
+  static const _lastCalKey  = 'last_calibration_v1';
 
-  // ── Read ──────────────────────────────────────────────────────────────────
+  /// The reserved name shown for the auto-saved entry.
+  static const lastCalName  = 'Last Calibration';
+
+  // ── Last Calibration (auto-saved on every CAL: packet) ───────────────────
+
+  Future<void> saveLastCalibration(CalibrationData data) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_lastCalKey, jsonEncode({
+      'values':  data.toList(),
+      'savedAt': DateTime.now().toIso8601String(),
+    }));
+  }
+
+  Future<GloveProfile?> loadLastCalibration() async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_lastCalKey);
+    if (raw == null) return null;
+    try {
+      final map = jsonDecode(raw) as Map<String, dynamic>;
+      return GloveProfile(
+        name:        lastCalName,
+        calibration: CalibrationData.fromList(
+            (map['values'] as List).cast<int>()),
+        savedAt: DateTime.parse(map['savedAt'] as String),
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+
+  // ── Named presets ─────────────────────────────────────────────────────────
 
   Future<List<GloveProfile>> loadAll() async {
     final prefs = await SharedPreferences.getInstance();

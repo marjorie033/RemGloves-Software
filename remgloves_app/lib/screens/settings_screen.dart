@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:iconify_flutter/iconify_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/calibration_data.dart';
 import '../models/glove_profile.dart';
@@ -303,13 +302,39 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   void _showGestureGuideSheet(BuildContext context) {
-    final gestures = [
-      {'gesture': 'Open Palm',    'action': 'Turn ON Smart Light',  'icon': AppIcons.handOpen,   'color': AppTheme.primary},
-      {'gesture': 'Closed Fist',  'action': 'Turn OFF Smart Light', 'icon': AppIcons.fist,       'color': AppTheme.primary},
-      {'gesture': 'Thumbs Up',    'action': 'Increase Fan Speed',   'icon': AppIcons.thumbsUp,   'color': AppTheme.primary},
-      {'gesture': 'Thumbs Down',  'action': 'Decrease Fan Speed',   'icon': AppIcons.thumbsDown, 'color': AppTheme.primary},
-      {'gesture': 'Peace Sign',   'action': 'Turn ON TV',           'icon': AppIcons.peaceSign,  'color': AppTheme.primary},
-      {'gesture': 'Point Up',     'action': 'Volume Up',            'icon': AppIcons.pointUp,    'color': AppTheme.primary},
+    // Bit order: Pinky(4) Ring(3) Middle(2) Index(1) Thumb(0) — 1=bent, 0=straight
+    // Each entry: [gesture label, 5-bit string, action text, icon]
+    const sections = [
+      {
+        'title': 'TV Remote',
+        'items': [
+          ["ASL 'D'",   '11101', 'Navigate UP',   AppIcons.pointUp  ],
+          ["ASL '2'",   '11001', 'Navigate DOWN', AppIcons.thumbsDown],
+          ["ASL 'F'",   '00011', 'Navigate LEFT', AppIcons.tv       ],
+          ["ASL 'B'",   '00001', 'Navigate RIGHT',AppIcons.tv       ],
+          ["ASL 'I'",   '01111', 'OK / Select',   AppIcons.peaceSign],
+          ["ASL 'K'",   '11000', 'Volume UP',     AppIcons.thumbsUp ],
+          ["ASL 'L'",   '11100', 'Volume DOWN',   AppIcons.thumbsDown],
+          ['Fist',      '11111', 'Back',          AppIcons.fist     ],
+          ["ASL 'W'",   '10001', 'Home',          AppIcons.handOpen ],
+          ["ASL 'Y'",   '01110', 'Netflix',       AppIcons.netflix  ],
+          ['Middle only','00100','TV Power ON',   AppIcons.tv       ],
+        ],
+      },
+      {
+        'title': 'Smart Light',
+        'items': [
+          ['Ring + Thumb',        '01001', 'Light ON',  AppIcons.lightbulb],
+          ['Ring + Middle + Thumb','01101','Light OFF', AppIcons.lightbulb],
+        ],
+      },
+      {
+        'title': 'Smart Fan',
+        'items': [
+          ['P + R + M + Index', '11110', 'Fan ON',  AppIcons.fan],
+          ['Ring + Middle',     '01100', 'Fan OFF', AppIcons.fan],
+        ],
+      },
     ];
 
     showModalBottomSheet(
@@ -317,7 +342,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (_) => Container(
-        height: MediaQuery.of(context).size.height * 0.65,
+        height: MediaQuery.of(context).size.height * 0.88,
         decoration: const BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
@@ -333,39 +358,51 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
             ),
             const Padding(
-              padding: EdgeInsets.all(20),
-              child: Text('Gesture Guide',
-                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
-            ),
-            Expanded(
-              child: ListView.separated(
-                padding: const EdgeInsets.symmetric(horizontal: 20),
-                itemCount: gestures.length,
-                separatorBuilder: (_, _) => const Divider(height: 1),
-                itemBuilder: (_, i) {
-                  final color = gestures[i]['color'] as Color;
-                  return ListTile(
-                    contentPadding: const EdgeInsets.symmetric(vertical: 4),
-                    leading: Container(
-                      width: 42, height: 42,
-                      decoration: BoxDecoration(
-                        color: color.withValues(alpha: 0.12),
-                        borderRadius: BorderRadius.circular(10),
-                        border: Border.all(color: const Color(0xFF483912), width: 1),
-                      ),
-                      child: Center(
-                        child: Iconify(gestures[i]['icon'] as String, color: color, size: 22),
-                      ),
-                    ),
-                    title: Text(gestures[i]['gesture'] as String,
-                        style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
-                    subtitle: Text(gestures[i]['action'] as String,
-                        style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary)),
-                  );
-                },
+              padding: EdgeInsets.fromLTRB(20, 16, 20, 4),
+              child: Row(
+                children: [
+                  Text('Gesture Guide',
+                      style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700)),
+                  Spacer(),
+                  Text('P  R  M  I  T',
+                      style: TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w600,
+                          color: AppTheme.textSecondary,
+                          letterSpacing: 1)),
+                ],
               ),
             ),
-            const SizedBox(height: 20),
+            Expanded(
+              child: ListView(
+                padding: const EdgeInsets.fromLTRB(20, 4, 20, 24),
+                children: [
+                  for (final section in sections) ...[
+                    Padding(
+                      padding: const EdgeInsets.only(top: 16, bottom: 8),
+                      child: Text(
+                        (section['title'] as String).toUpperCase(),
+                        style: const TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                          color: AppTheme.textSecondary,
+                          letterSpacing: 0.6,
+                        ),
+                      ),
+                    ),
+                    for (final item in section['items'] as List) ...[
+                      _GestureRow(
+                        label:  item[0] as String,
+                        bits:   item[1] as String,
+                        action: item[2] as String,
+                        icon:   item[3] as String,
+                      ),
+                      const SizedBox(height: 6),
+                    ],
+                  ],
+                ],
+              ),
+            ),
           ],
         ),
       ),
@@ -727,11 +764,18 @@ class _CalibrationSheet extends StatefulWidget {
 
 class _CalibrationSheetState extends State<_CalibrationSheet> {
   List<GloveProfile> _profiles = [];
+  GloveProfile? _lastCal;
   bool _calibrating = false;
   CalibrationData? _pendingCal;
   StreamSubscription<CalibrationData>? _calSub;
   final _nameCtrl = TextEditingController();
   bool _saving = false;
+
+  // Load-confirmation tracking
+  String? _loadingPreset;  // name of the preset currently being loaded
+  String? _resultPreset;   // name of the preset whose result is showing
+  bool?   _loadResult;     // true = success, false = timeout/fail
+  Timer?  _loadTimeout;
 
   @override
   void initState() {
@@ -743,22 +787,46 @@ class _CalibrationSheetState extends State<_CalibrationSheet> {
   @override
   void dispose() {
     _calSub?.cancel();
+    _loadTimeout?.cancel();
     _nameCtrl.dispose();
     super.dispose();
   }
 
   Future<void> _loadProfiles() async {
     final profiles = await widget.profileService.loadAll();
-    if (mounted) setState(() => _profiles = profiles);
+    final lastCal  = await widget.profileService.loadLastCalibration();
+    if (!mounted) return;
+    setState(() {
+      _profiles = profiles;
+      _lastCal  = lastCal;
+    });
   }
 
   void _onCal(CalibrationData data) {
     if (!mounted) return;
-    setState(() {
-      _calibrating = false;
-      _pendingCal  = data;
-      _nameCtrl.text = 'Preset ${_profiles.length + 1}';
-    });
+    _loadTimeout?.cancel();
+    if (_loadingPreset != null) {
+      // This is a LOAD: echo — show success on that tile.
+      final name = _loadingPreset!;
+      setState(() {
+        _loadingPreset = null;
+        _resultPreset  = name;
+        _loadResult    = true;
+        _calibrating   = false;
+      });
+      _loadProfiles(); // refresh last-cal timestamp
+      Future.delayed(const Duration(seconds: 2), () {
+        if (mounted) setState(() { _resultPreset = null; _loadResult = null; });
+      });
+    } else {
+      // This is a fresh calibration result — show the save-as-preset form.
+      setState(() {
+        _calibrating = false;
+        _pendingCal  = data;
+        _nameCtrl.text = 'Preset ${_profiles.length + 1}';
+      });
+      _loadProfiles(); // refresh last-cal entry
+    }
   }
 
   Future<void> _recalibrate() async {
@@ -799,8 +867,16 @@ class _CalibrationSheetState extends State<_CalibrationSheet> {
   }
 
   Future<void> _loadPreset(GloveProfile p) async {
+    setState(() { _loadingPreset = p.name; _resultPreset = null; _loadResult = null; });
+    _loadTimeout?.cancel();
+    _loadTimeout = Timer(const Duration(seconds: 6), () {
+      if (!mounted) return;
+      setState(() { _loadingPreset = null; _resultPreset = p.name; _loadResult = false; });
+      Future.delayed(const Duration(seconds: 2), () {
+        if (mounted) setState(() { _resultPreset = null; _loadResult = null; });
+      });
+    });
     await widget.ble.loadProfile(p.calibration);
-    // ESP32 echoes CAL: on success → _onCal fires automatically.
   }
 
   Future<void> _deletePreset(GloveProfile p) async {
@@ -994,7 +1070,7 @@ class _CalibrationSheetState extends State<_CalibrationSheet> {
 
           // ── Preset list ──────────────────────────────────────────────
           Expanded(
-            child: _profiles.isEmpty
+            child: (_lastCal == null && _profiles.isEmpty)
                 ? const Center(
                     child: Text(
                       'No presets saved yet.\nRecalibrate to create your first preset.',
@@ -1003,17 +1079,39 @@ class _CalibrationSheetState extends State<_CalibrationSheet> {
                           fontSize: 13, color: AppTheme.textSecondary),
                     ),
                   )
-                : ListView.separated(
+                : ListView(
                     padding: const EdgeInsets.symmetric(horizontal: 20),
-                    itemCount: _profiles.length,
-                    separatorBuilder: (_, _) =>
-                        const SizedBox(height: 8),
-                    itemBuilder: (_, i) => _PresetTile(
-                      profile: _profiles[i],
-                      canLoad: connected,
-                      onLoad: () => _loadPreset(_profiles[i]),
-                      onDelete: () => _deletePreset(_profiles[i]),
-                    ),
+                    children: [
+                      // Pinned "Last Calibration" — always first, never deletable
+                      if (_lastCal != null) ...[
+                        _PresetTile(
+                          profile:   _lastCal!,
+                          canLoad:   connected,
+                          pinned:    true,
+                          isLoading: _loadingPreset == ProfileService.lastCalName,
+                          loadResult: _resultPreset == ProfileService.lastCalName
+                              ? _loadResult : null,
+                          onLoad:   () => _loadPreset(_lastCal!),
+                          onDelete: null,
+                        ),
+                        if (_profiles.isNotEmpty)
+                          const SizedBox(height: 8),
+                      ],
+                      // Named presets
+                      ..._profiles.map((p) => Padding(
+                        padding: const EdgeInsets.only(bottom: 8),
+                        child: _PresetTile(
+                          profile:    p,
+                          canLoad:    connected,
+                          pinned:     false,
+                          isLoading:  _loadingPreset == p.name,
+                          loadResult: _resultPreset == p.name
+                              ? _loadResult : null,
+                          onLoad:   () => _loadPreset(p),
+                          onDelete: () => _deletePreset(p),
+                        ),
+                      )),
+                    ],
                   ),
           ),
           const SizedBox(height: 20),
@@ -1028,24 +1126,41 @@ class _CalibrationSheetState extends State<_CalibrationSheet> {
 class _PresetTile extends StatelessWidget {
   final GloveProfile profile;
   final bool canLoad;
+  final bool pinned;        // true = "Last Calibration" — no delete button
+  final bool isLoading;     // LOAD: in flight
+  final bool? loadResult;   // null = idle, true = success, false = fail
   final VoidCallback onLoad;
-  final VoidCallback onDelete;
+  final VoidCallback? onDelete;
 
   const _PresetTile({
     required this.profile,
     required this.canLoad,
+    required this.pinned,
+    required this.isLoading,
+    required this.loadResult,
     required this.onLoad,
     required this.onDelete,
   });
 
   @override
   Widget build(BuildContext context) {
-    return Container(
+    // Result colour used for both the icon badge and the border flash.
+    final Color? resultColor = loadResult == null
+        ? null
+        : loadResult!
+            ? const Color(0xFF2E9E5B)
+            : Colors.red.shade600;
+
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 250),
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0xFF483912), width: 1),
+        border: Border.all(
+          color: resultColor ?? const Color(0xFF483912),
+          width: resultColor != null ? 1.5 : 1,
+        ),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withValues(alpha: 0.04),
@@ -1056,27 +1171,56 @@ class _PresetTile extends StatelessWidget {
       ),
       child: Row(
         children: [
+          // ── Icon badge ─────────────────────────────────────────────
           Container(
             width: 36, height: 36,
             decoration: BoxDecoration(
-              color: AppTheme.primary.withValues(alpha: 0.12),
+              color: (resultColor ?? AppTheme.primary).withValues(alpha: 0.12),
               borderRadius: BorderRadius.circular(8),
               border: Border.all(color: const Color(0xFF483912)),
             ),
-            child: const Icon(Icons.tune,
-                color: AppTheme.primary, size: 18),
+            child: Icon(
+              pinned ? Icons.history : Icons.tune,
+              color: resultColor ?? AppTheme.primary,
+              size: 18,
+            ),
           ),
           const SizedBox(width: 12),
+
+          // ── Name + timestamp ────────────────────────────────────────
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  profile.name,
-                  style: const TextStyle(
-                      fontWeight: FontWeight.w600,
-                      fontSize: 13,
-                      color: AppTheme.textPrimary),
+                Row(
+                  children: [
+                    Flexible(
+                      child: Text(
+                        profile.name,
+                        style: TextStyle(
+                          fontWeight: FontWeight.w600,
+                          fontSize: 13,
+                          color: resultColor ?? AppTheme.textPrimary,
+                        ),
+                      ),
+                    ),
+                    if (pinned) ...[
+                      const SizedBox(width: 6),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 5, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: AppTheme.primary.withValues(alpha: 0.12),
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: const Text('AUTO',
+                            style: TextStyle(
+                                fontSize: 9,
+                                fontWeight: FontWeight.w700,
+                                color: AppTheme.primary)),
+                      ),
+                    ],
+                  ],
                 ),
                 const SizedBox(height: 2),
                 Text(
@@ -1087,35 +1231,66 @@ class _PresetTile extends StatelessWidget {
               ],
             ),
           ),
-          GestureDetector(
-            onTap: onDelete,
-            child: Container(
-              width: 28, height: 28,
-              margin: const EdgeInsets.only(right: 8),
-              decoration: BoxDecoration(
-                color: Colors.red.withValues(alpha: 0.08),
-                borderRadius: BorderRadius.circular(7),
-              ),
-              child: const Icon(Icons.delete_outline,
-                  size: 15, color: Colors.red),
-            ),
-          ),
-          TextButton(
-            onPressed: canLoad ? onLoad : null,
-            style: TextButton.styleFrom(
-              foregroundColor: AppTheme.primary,
-              disabledForegroundColor: Colors.grey,
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-              minimumSize: Size.zero,
-              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(8),
-                side: BorderSide(
-                    color: canLoad ? AppTheme.primary : Colors.grey.shade300),
+
+          // ── Delete button (hidden for pinned) ───────────────────────
+          if (!pinned && onDelete != null)
+            GestureDetector(
+              onTap: onDelete,
+              child: Container(
+                width: 28, height: 28,
+                margin: const EdgeInsets.only(right: 8),
+                decoration: BoxDecoration(
+                  color: Colors.red.withValues(alpha: 0.08),
+                  borderRadius: BorderRadius.circular(7),
+                ),
+                child: const Icon(Icons.delete_outline,
+                    size: 15, color: Colors.red),
               ),
             ),
-            child: const Text('Load',
-                style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+
+          // ── Load button / spinner / result icon ─────────────────────
+          SizedBox(
+            width: 56,
+            child: isLoading
+                ? const Center(
+                    child: SizedBox(
+                      width: 18, height: 18,
+                      child: CircularProgressIndicator(
+                          strokeWidth: 2, color: AppTheme.primary),
+                    ),
+                  )
+                : loadResult != null
+                    ? Center(
+                        child: Icon(
+                          loadResult!
+                              ? Icons.check_circle
+                              : Icons.error_outline,
+                          size: 20,
+                          color: resultColor,
+                        ),
+                      )
+                    : TextButton(
+                        onPressed: canLoad ? onLoad : null,
+                        style: TextButton.styleFrom(
+                          foregroundColor: AppTheme.primary,
+                          disabledForegroundColor: Colors.grey,
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 10, vertical: 6),
+                          minimumSize: Size.zero,
+                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8),
+                            side: BorderSide(
+                                color: canLoad
+                                    ? AppTheme.primary
+                                    : Colors.grey.shade300),
+                          ),
+                        ),
+                        child: const Text('Load',
+                            style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600)),
+                      ),
           ),
         ],
       ),
@@ -1127,6 +1302,113 @@ class _PresetTile extends StatelessWidget {
       '${dt.day.toString().padLeft(2, '0')}  '
       '${dt.hour.toString().padLeft(2, '0')}:'
       '${dt.minute.toString().padLeft(2, '0')}';
+}
+
+// ── Gesture guide row ─────────────────────────────────────────────────────────
+
+class _GestureRow extends StatelessWidget {
+  final String label;   // e.g. "ASL 'D'"
+  final String bits;    // 5-char binary string, MSB=Pinky, LSB=Thumb
+  final String action;  // e.g. "Navigate UP"
+  final String icon;    // AppIcons constant
+
+  const _GestureRow({
+    required this.label,
+    required this.bits,
+    required this.action,
+    required this.icon,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: const Color(0xFF483912), width: 1),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.03),
+            blurRadius: 4,
+            offset: const Offset(0, 1),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          // Icon badge
+          Container(
+            width: 36, height: 36,
+            decoration: BoxDecoration(
+              color: AppTheme.primary.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: const Color(0xFF483912)),
+            ),
+            child: Center(
+              child: Icon(_iconData(icon), color: AppTheme.primary, size: 18),
+            ),
+          ),
+          const SizedBox(width: 10),
+
+          // Label + action
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(label,
+                    style: const TextStyle(
+                        fontWeight: FontWeight.w600,
+                        fontSize: 12,
+                        color: AppTheme.textPrimary)),
+                Text(action,
+                    style: const TextStyle(
+                        fontSize: 11, color: AppTheme.textSecondary)),
+              ],
+            ),
+          ),
+
+          // Finger-pattern dots (● = bent, ○ = straight)
+          Row(
+            children: List.generate(5, (i) {
+              final bent = bits[i] == '1';
+              return Container(
+                width: 14, height: 14,
+                margin: const EdgeInsets.only(left: 3),
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: bent
+                      ? AppTheme.primary
+                      : AppTheme.primary.withValues(alpha: 0.0),
+                  border: Border.all(
+                    color: bent
+                        ? AppTheme.primary
+                        : Colors.grey.shade400,
+                    width: 1.5,
+                  ),
+                ),
+              );
+            }),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // Map AppIcons SVG strings back to a Material icon for display without Iconify.
+  IconData _iconData(String svgConst) {
+    if (svgConst == AppIcons.lightbulb)   return Icons.lightbulb_outline;
+    if (svgConst == AppIcons.fan)          return Icons.air;
+    if (svgConst == AppIcons.tv)           return Icons.tv_outlined;
+    if (svgConst == AppIcons.netflix)      return Icons.play_circle_outline;
+    if (svgConst == AppIcons.thumbsUp)     return Icons.thumb_up_outlined;
+    if (svgConst == AppIcons.thumbsDown)   return Icons.thumb_down_outlined;
+    if (svgConst == AppIcons.fist)         return Icons.back_hand_outlined;
+    if (svgConst == AppIcons.handOpen)     return Icons.pan_tool_outlined;
+    if (svgConst == AppIcons.pointUp)      return Icons.touch_app_outlined;
+    if (svgConst == AppIcons.peaceSign)    return Icons.front_hand_outlined;
+    return Icons.gesture;
+  }
 }
 
 // ── WiFi config sheet ─────────────────────────────────────────────────────────

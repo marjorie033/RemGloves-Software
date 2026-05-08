@@ -7,10 +7,13 @@ import 'screens/monitor_screen.dart';
 import 'screens/simulation_screen.dart';
 import 'screens/logs_screen.dart';
 import 'screens/settings_screen.dart';
+import 'dart:async';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'services/mqtt_service.dart';
 import 'services/ble_service.dart';
 import 'services/gesture_log_service.dart';
+import 'models/calibration_data.dart';
+import 'services/profile_service.dart';
 import 'theme/app_theme.dart';
 import 'theme/app_icons.dart';
 
@@ -55,6 +58,10 @@ class _MainShellState extends State<MainShell> {
   late final GestureLogService _gestureLogService;
   late final List<Widget> _screens;
 
+  final _profileService = ProfileService();
+  StreamSubscription<CalibrationData>? _calSub;
+  StreamSubscription<BleStatus>? _bleSub;
+
   @override
   void initState() {
     super.initState();
@@ -68,6 +75,23 @@ class _MainShellState extends State<MainShell> {
       LogsScreen(ble: _bleService),
       SettingsScreen(ble: _bleService),
     ];
+
+    // Persist every CAL: packet so "Last Calibration" is always current.
+    _calSub = _bleService.calibrationStream.listen((cal) {
+      _profileService.saveLastCalibration(cal);
+    });
+
+    // On reconnect, push the last known calibration back to the glove
+    // (ESP32 resets to firmware defaults on each boot).
+    _bleSub = _bleService.statusStream.listen((status) async {
+      if (status == BleStatus.connected) {
+        final last = await _profileService.loadLastCalibration();
+        if (last != null) {
+          await _bleService.loadProfile(last.calibration);
+        }
+      }
+    });
+
     _autoConnectIfEnabled();
   }
 
@@ -80,6 +104,8 @@ class _MainShellState extends State<MainShell> {
 
   @override
   void dispose() {
+    _calSub?.cancel();
+    _bleSub?.cancel();
     _mqttService.dispose();
     _gestureLogService.dispose();
     _bleService.dispose();
