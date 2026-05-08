@@ -2,13 +2,19 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:iconify_flutter/iconify_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../models/calibration_data.dart';
+import '../models/glove_profile.dart';
 import '../services/ble_service.dart';
+import '../services/profile_service.dart';
+import '../widgets/calibration_dialog.dart';
+import 'serial_monitor_screen.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_bar.dart';
 import '../widgets/rounded_body.dart';
 import '../theme/app_icons.dart';
 
 const String _prefAutoConnect = 'auto_connect_glove';
+const String _prefWifiSsid   = 'wifi_ssid';
 
 class SettingsScreen extends StatefulWidget {
   final BleService ble;
@@ -23,7 +29,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
   BleStatus _bleStatus = BleStatus.idle;
   bool _autoConnect = false;
 
+  final _profileService = ProfileService();
+  CalibrationData? _activeCalibration;
+  int _profileCount = 0;
+  String? _savedSsid;
+
   StreamSubscription<BleStatus>? _bleSub;
+  StreamSubscription<CalibrationData>? _calSub;
 
   @override
   void initState() {
@@ -32,18 +44,65 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _bleSub = widget.ble.statusStream.listen((s) {
       if (mounted) setState(() => _bleStatus = s);
     });
+    _calSub = widget.ble.calibrationStream.listen((cal) {
+      if (mounted) setState(() => _activeCalibration = cal);
+    });
     _loadPrefs();
+    _refreshProfileCount();
   }
 
   @override
   void dispose() {
     _bleSub?.cancel();
+    _calSub?.cancel();
     super.dispose();
+  }
+
+  Future<void> _refreshProfileCount() async {
+    final profiles = await _profileService.loadAll();
+    if (mounted) setState(() => _profileCount = profiles.length);
   }
 
   Future<void> _loadPrefs() async {
     final prefs = await SharedPreferences.getInstance();
-    if (mounted) setState(() => _autoConnect = prefs.getBool(_prefAutoConnect) ?? false);
+    if (!mounted) return;
+    setState(() {
+      _autoConnect = prefs.getBool(_prefAutoConnect) ?? false;
+      _savedSsid   = prefs.getString(_prefWifiSsid);
+    });
+  }
+
+  Future<void> _onWifiConnected(String ssid) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_prefWifiSsid, ssid);
+    if (mounted) setState(() => _savedSsid = ssid);
+  }
+
+  void _showCalibrationSheet(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _CalibrationSheet(
+        ble: widget.ble,
+        profileService: _profileService,
+        activeCalibration: _activeCalibration,
+        onProfilesChanged: _refreshProfileCount,
+      ),
+    );
+  }
+
+  void _showWifiConfigSheet(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _WifiConfigSheet(
+        ble: widget.ble,
+        currentSsid: _savedSsid,
+        onConnected: _onWifiConnected,
+      ),
+    );
   }
 
   Future<void> _setAutoConnect(bool value) async {
@@ -98,6 +157,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     value: _autoConnect,
                     onChanged: _setAutoConnect,
                   ),
+                  const SizedBox(height: 10),
+                  _SettingsTile(
+                    icon: Icons.tune,
+                    iconColor: AppTheme.primary,
+                    title: 'Calibration Presets',
+                    subtitle: _profileCount == 0
+                        ? 'No presets saved'
+                        : '$_profileCount preset${_profileCount == 1 ? '' : 's'} saved',
+                    onTap: () => _showCalibrationSheet(context),
+                  ),
                   const SizedBox(height: 20),
 
                   // ── Account ──────────────────────────────────────────
@@ -113,6 +182,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ),
                   const SizedBox(height: 10),
                   _SettingsTile(
+                    icon: Icons.wifi,
+                    iconColor: AppTheme.primary,
+                    title: 'WiFi Configuration',
+                    subtitle: _savedSsid != null
+                        ? 'Connected to "$_savedSsid"'
+                        : 'Not configured',
+                    onTap: () => _showWifiConfigSheet(context),
+                  ),
+                  const SizedBox(height: 10),
+                  _SettingsTile(
                     icon: Icons.pan_tool_alt_outlined,
                     iconColor: AppTheme.primary,
                     title: 'Gesture Guide',
@@ -122,6 +201,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
                   // ── About ─────────────────────────────────────────────
                   const _SectionHeader(title: 'About'),
+                  const SizedBox(height: 10),
+                  _SettingsTile(
+                    icon: Icons.terminal,
+                    iconColor: AppTheme.primary,
+                    title: 'Serial Monitor',
+                    subtitle: 'Debug — live LOG: messages from glove',
+                    onTap: () => Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) =>
+                            SerialMonitorScreen(ble: widget.ble),
+                      ),
+                    ),
+                  ),
                   const SizedBox(height: 10),
                   _SettingsTile(
                     icon: Icons.info_outline,
@@ -609,6 +701,737 @@ class _SmallToggle extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+// ── Calibration bottom sheet ──────────────────────────────────────────────────
+
+class _CalibrationSheet extends StatefulWidget {
+  final BleService ble;
+  final ProfileService profileService;
+  final CalibrationData? activeCalibration;
+  final VoidCallback onProfilesChanged;
+
+  const _CalibrationSheet({
+    required this.ble,
+    required this.profileService,
+    required this.activeCalibration,
+    required this.onProfilesChanged,
+  });
+
+  @override
+  State<_CalibrationSheet> createState() => _CalibrationSheetState();
+}
+
+class _CalibrationSheetState extends State<_CalibrationSheet> {
+  List<GloveProfile> _profiles = [];
+  bool _calibrating = false;
+  CalibrationData? _pendingCal;
+  StreamSubscription<CalibrationData>? _calSub;
+  final _nameCtrl = TextEditingController();
+  bool _saving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadProfiles();
+    _calSub = widget.ble.calibrationStream.listen(_onCal);
+  }
+
+  @override
+  void dispose() {
+    _calSub?.cancel();
+    _nameCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadProfiles() async {
+    final profiles = await widget.profileService.loadAll();
+    if (mounted) setState(() => _profiles = profiles);
+  }
+
+  void _onCal(CalibrationData data) {
+    if (!mounted) return;
+    setState(() {
+      _calibrating = false;
+      _pendingCal  = data;
+      _nameCtrl.text = 'Preset ${_profiles.length + 1}';
+    });
+  }
+
+  Future<void> _recalibrate() async {
+    // Auto-backup the current active calibration before overwriting it.
+    if (widget.activeCalibration != null) {
+      final now  = DateTime.now();
+      final name = 'Backup ${now.month}/${now.day} '
+          '${now.hour.toString().padLeft(2, '0')}:'
+          '${now.minute.toString().padLeft(2, '0')}';
+      await widget.profileService.save(GloveProfile(
+        name: name,
+        calibration: widget.activeCalibration!,
+        savedAt: now,
+      ));
+      await _loadProfiles();
+      widget.onProfilesChanged();
+    }
+    setState(() { _calibrating = true; _pendingCal = null; });
+    await widget.ble.startCalibration();
+
+    if (!mounted) return;
+    await showCalibrationProgressDialog(context, widget.ble);
+    if (mounted) setState(() => _calibrating = false);
+  }
+
+  Future<void> _savePreset() async {
+    final name = _nameCtrl.text.trim();
+    if (name.isEmpty || _pendingCal == null) return;
+    setState(() => _saving = true);
+    await widget.profileService.save(GloveProfile(
+      name: name,
+      calibration: _pendingCal!,
+      savedAt: DateTime.now(),
+    ));
+    setState(() { _saving = false; _pendingCal = null; });
+    await _loadProfiles();
+    widget.onProfilesChanged();
+  }
+
+  Future<void> _loadPreset(GloveProfile p) async {
+    await widget.ble.loadProfile(p.calibration);
+    // ESP32 echoes CAL: on success → _onCal fires automatically.
+  }
+
+  Future<void> _deletePreset(GloveProfile p) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Delete preset?'),
+        content: Text('Remove "${p.name}"? This cannot be undone.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Delete', style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    await widget.profileService.delete(p.name);
+    await _loadProfiles();
+    widget.onProfilesChanged();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final connected = widget.ble.status == BleStatus.connected;
+
+    return Container(
+      height: MediaQuery.of(context).size.height * 0.78,
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // ── Handle ──────────────────────────────────────────────────────
+          Center(
+            child: Container(
+              margin: const EdgeInsets.only(top: 12, bottom: 4),
+              width: 40, height: 4,
+              decoration: BoxDecoration(
+                color: Colors.grey.shade300,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+          ),
+
+          // ── Header row ───────────────────────────────────────────────
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
+            child: Row(
+              children: [
+                const Text(
+                  'Calibration Presets',
+                  style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700),
+                ),
+                const Spacer(),
+                ElevatedButton.icon(
+                  onPressed: (!connected || _calibrating) ? null : _recalibrate,
+                  icon: _calibrating
+                      ? const SizedBox(
+                          width: 13, height: 13,
+                          child: CircularProgressIndicator(
+                              strokeWidth: 2, color: Colors.white),
+                        )
+                      : const Icon(Icons.sync, size: 15),
+                  label: Text(_calibrating ? 'Calibrating…' : 'Recalibrate'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppTheme.primary,
+                    foregroundColor: Colors.white,
+                    disabledBackgroundColor: Colors.grey.shade300,
+                    elevation: 0,
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    textStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10)),
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          // ── Glove-not-connected warning ───────────────────────────────
+          if (!connected)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 8, 20, 0),
+              child: Row(
+                children: [
+                  Icon(Icons.info_outline, size: 13,
+                      color: Colors.orange.shade700),
+                  const SizedBox(width: 5),
+                  Text(
+                    'Connect your glove to recalibrate',
+                    style: TextStyle(
+                        fontSize: 12, color: Colors.orange.shade700),
+                  ),
+                ],
+              ),
+            ),
+
+          // ── Save new preset form (appears after CAL: received) ───────
+          if (_pendingCal != null)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 14, 20, 0),
+              child: Container(
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFE6F9EE),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                      color: const Color(0xFF2E9E5B).withValues(alpha: 0.4)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Row(
+                      children: [
+                        Icon(Icons.check_circle,
+                            size: 15, color: Color(0xFF2E9E5B)),
+                        SizedBox(width: 6),
+                        Text(
+                          'Calibration complete!',
+                          style: TextStyle(
+                              fontWeight: FontWeight.w600,
+                              fontSize: 13,
+                              color: Color(0xFF2E9E5B)),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+                    TextField(
+                      controller: _nameCtrl,
+                      decoration: InputDecoration(
+                        labelText: 'Preset name',
+                        labelStyle: const TextStyle(fontSize: 12),
+                        isDense: true,
+                        contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 10),
+                        border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(8)),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                          borderSide:
+                              const BorderSide(color: AppTheme.primary),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton(
+                        onPressed: _saving ? null : _savePreset,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: AppTheme.primary,
+                          foregroundColor: Colors.white,
+                          elevation: 0,
+                          padding:
+                              const EdgeInsets.symmetric(vertical: 10),
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(8)),
+                        ),
+                        child: Text(
+                          _saving ? 'Saving…' : 'Save as Preset',
+                          style: const TextStyle(
+                              fontSize: 13, fontWeight: FontWeight.w600),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+
+          // ── Saved presets label ──────────────────────────────────────
+          const Padding(
+            padding: EdgeInsets.fromLTRB(20, 18, 20, 8),
+            child: Text(
+              'SAVED PRESETS',
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+                color: AppTheme.textSecondary,
+                letterSpacing: 0.6,
+              ),
+            ),
+          ),
+
+          // ── Preset list ──────────────────────────────────────────────
+          Expanded(
+            child: _profiles.isEmpty
+                ? const Center(
+                    child: Text(
+                      'No presets saved yet.\nRecalibrate to create your first preset.',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                          fontSize: 13, color: AppTheme.textSecondary),
+                    ),
+                  )
+                : ListView.separated(
+                    padding: const EdgeInsets.symmetric(horizontal: 20),
+                    itemCount: _profiles.length,
+                    separatorBuilder: (_, _) =>
+                        const SizedBox(height: 8),
+                    itemBuilder: (_, i) => _PresetTile(
+                      profile: _profiles[i],
+                      canLoad: connected,
+                      onLoad: () => _loadPreset(_profiles[i]),
+                      onDelete: () => _deletePreset(_profiles[i]),
+                    ),
+                  ),
+          ),
+          const SizedBox(height: 20),
+        ],
+      ),
+    );
+  }
+}
+
+// ── Preset tile ───────────────────────────────────────────────────────────────
+
+class _PresetTile extends StatelessWidget {
+  final GloveProfile profile;
+  final bool canLoad;
+  final VoidCallback onLoad;
+  final VoidCallback onDelete;
+
+  const _PresetTile({
+    required this.profile,
+    required this.canLoad,
+    required this.onLoad,
+    required this.onDelete,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFF483912), width: 1),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.04),
+            blurRadius: 6,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 36, height: 36,
+            decoration: BoxDecoration(
+              color: AppTheme.primary.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: const Color(0xFF483912)),
+            ),
+            child: const Icon(Icons.tune,
+                color: AppTheme.primary, size: 18),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  profile.name,
+                  style: const TextStyle(
+                      fontWeight: FontWeight.w600,
+                      fontSize: 13,
+                      color: AppTheme.textPrimary),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  _fmt(profile.savedAt),
+                  style: const TextStyle(
+                      fontSize: 11, color: AppTheme.textSecondary),
+                ),
+              ],
+            ),
+          ),
+          GestureDetector(
+            onTap: onDelete,
+            child: Container(
+              width: 28, height: 28,
+              margin: const EdgeInsets.only(right: 8),
+              decoration: BoxDecoration(
+                color: Colors.red.withValues(alpha: 0.08),
+                borderRadius: BorderRadius.circular(7),
+              ),
+              child: const Icon(Icons.delete_outline,
+                  size: 15, color: Colors.red),
+            ),
+          ),
+          TextButton(
+            onPressed: canLoad ? onLoad : null,
+            style: TextButton.styleFrom(
+              foregroundColor: AppTheme.primary,
+              disabledForegroundColor: Colors.grey,
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              minimumSize: Size.zero,
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+                side: BorderSide(
+                    color: canLoad ? AppTheme.primary : Colors.grey.shade300),
+              ),
+            ),
+            child: const Text('Load',
+                style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _fmt(DateTime dt) =>
+      '${dt.year}-${dt.month.toString().padLeft(2, '0')}-'
+      '${dt.day.toString().padLeft(2, '0')}  '
+      '${dt.hour.toString().padLeft(2, '0')}:'
+      '${dt.minute.toString().padLeft(2, '0')}';
+}
+
+// ── WiFi config sheet ─────────────────────────────────────────────────────────
+
+enum _WifiState { idle, sending, success, fail }
+
+class _WifiConfigSheet extends StatefulWidget {
+  final BleService ble;
+  final String? currentSsid;
+  final ValueChanged<String> onConnected;
+
+  const _WifiConfigSheet({
+    required this.ble,
+    required this.currentSsid,
+    required this.onConnected,
+  });
+
+  @override
+  State<_WifiConfigSheet> createState() => _WifiConfigSheetState();
+}
+
+class _WifiConfigSheetState extends State<_WifiConfigSheet> {
+  final _ssidCtrl   = TextEditingController();
+  final _passCtrl   = TextEditingController();
+  bool _obscurePass = true;
+  _WifiState _state = _WifiState.idle;
+  StreamSubscription<String>? _wifiSub;
+
+  bool get _pipeInPassword => _passCtrl.text.contains('|');
+  bool get _connected       => widget.ble.status == BleStatus.connected;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.currentSsid != null) _ssidCtrl.text = widget.currentSsid!;
+    _passCtrl.addListener(() => setState(() {}));
+    _wifiSub = widget.ble.wifiStream.listen(_onWifiResult);
+  }
+
+  @override
+  void dispose() {
+    _wifiSub?.cancel();
+    _ssidCtrl.dispose();
+    _passCtrl.dispose();
+    super.dispose();
+  }
+
+  void _onWifiResult(String result) {
+    if (!mounted) return;
+    setState(() => _state =
+        result == 'OK' ? _WifiState.success : _WifiState.fail);
+    if (_state == _WifiState.success) {
+      widget.onConnected(_ssidCtrl.text.trim());
+    }
+  }
+
+  Future<void> _send() async {
+    final ssid = _ssidCtrl.text.trim();
+    final pass = _passCtrl.text;
+    if (ssid.isEmpty) return;
+    setState(() => _state = _WifiState.sending);
+    await widget.ble.sendWifiCredentials(ssid, pass);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final canSend = _connected &&
+        _ssidCtrl.text.trim().isNotEmpty &&
+        !_pipeInPassword &&
+        _state != _WifiState.sending;
+
+    return Padding(
+      // Shift sheet up when keyboard appears.
+      padding: EdgeInsets.only(
+          bottom: MediaQuery.of(context).viewInsets.bottom),
+      child: Container(
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        ),
+        padding: const EdgeInsets.fromLTRB(20, 12, 20, 28),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // ── Handle ──────────────────────────────────────────────
+            Center(
+              child: Container(
+                width: 40, height: 4,
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade300,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+
+            // ── Title ────────────────────────────────────────────────
+            Row(children: [
+              Container(
+                width: 36, height: 36,
+                decoration: BoxDecoration(
+                  color: AppTheme.primary.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(9),
+                  border: Border.all(color: const Color(0xFF483912)),
+                ),
+                child: const Icon(Icons.wifi,
+                    color: AppTheme.primary, size: 18),
+              ),
+              const SizedBox(width: 12),
+              const Text(
+                'WiFi Configuration',
+                style: TextStyle(
+                    fontSize: 17, fontWeight: FontWeight.w700),
+              ),
+            ]),
+            const SizedBox(height: 6),
+
+            // ── Current network badge ────────────────────────────────
+            if (widget.currentSsid != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 4, bottom: 2),
+                child: Row(children: [
+                  const Icon(Icons.check_circle,
+                      size: 13, color: Color(0xFF2E9E5B)),
+                  const SizedBox(width: 5),
+                  Text(
+                    'Glove is on "${widget.currentSsid}"',
+                    style: const TextStyle(
+                        fontSize: 12, color: Color(0xFF2E9E5B)),
+                  ),
+                ]),
+              ),
+            const SizedBox(height: 18),
+
+            // ── Not-connected warning ────────────────────────────────
+            if (!_connected)
+              _InfoBanner(
+                icon: Icons.bluetooth_disabled,
+                color: Colors.orange.shade700,
+                message: 'Connect your glove via Bluetooth first.',
+              ),
+
+            // ── SSID field ───────────────────────────────────────────
+            _sheetLabel('Network name (SSID)'),
+            const SizedBox(height: 6),
+            TextField(
+              controller: _ssidCtrl,
+              enabled: _state != _WifiState.sending,
+              onChanged: (_) => setState(() {}),
+              decoration: _fieldDecor('e.g. HomeNetwork'),
+            ),
+            const SizedBox(height: 14),
+
+            // ── Password field ───────────────────────────────────────
+            _sheetLabel('Password'),
+            const SizedBox(height: 6),
+            TextField(
+              controller: _passCtrl,
+              enabled: _state != _WifiState.sending,
+              obscureText: _obscurePass,
+              decoration: _fieldDecor('Enter password').copyWith(
+                suffixIcon: IconButton(
+                  icon: Icon(
+                    _obscurePass
+                        ? Icons.visibility_off_outlined
+                        : Icons.visibility_outlined,
+                    size: 18,
+                    color: AppTheme.textSecondary,
+                  ),
+                  onPressed: () =>
+                      setState(() => _obscurePass = !_obscurePass),
+                ),
+              ),
+            ),
+
+            // ── Pipe character warning ───────────────────────────────
+            if (_pipeInPassword)
+              _InfoBanner(
+                icon: Icons.warning_amber_rounded,
+                color: Colors.red.shade700,
+                message:
+                    'Password contains "|" which is a reserved separator. '
+                    'Please use a different password.',
+                topPadding: 10,
+              ),
+
+            const SizedBox(height: 20),
+
+            // ── Status feedback ──────────────────────────────────────
+            if (_state == _WifiState.success)
+              _InfoBanner(
+                icon: Icons.check_circle,
+                color: const Color(0xFF2E9E5B),
+                message:
+                    'Connected! Glove is now on "${_ssidCtrl.text.trim()}".',
+              ),
+            if (_state == _WifiState.fail)
+              _InfoBanner(
+                icon: Icons.error_outline,
+                color: Colors.red.shade700,
+                message: 'Connection failed. Check the SSID and password'
+                    ' and try again.',
+              ),
+
+            const SizedBox(height: 6),
+
+            // ── Connect button ───────────────────────────────────────
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed: canSend ? _send : null,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: _state == _WifiState.success
+                      ? const Color(0xFF2E9E5B)
+                      : AppTheme.primary,
+                  foregroundColor: Colors.white,
+                  disabledBackgroundColor: Colors.grey.shade200,
+                  elevation: 0,
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12)),
+                ),
+                child: _state == _WifiState.sending
+                    ? const SizedBox(
+                        width: 18, height: 18,
+                        child: CircularProgressIndicator(
+                            strokeWidth: 2, color: Colors.white),
+                      )
+                    : Text(
+                        _state == _WifiState.fail
+                            ? 'Retry'
+                            : 'Connect',
+                        style: const TextStyle(
+                            fontSize: 14, fontWeight: FontWeight.w600),
+                      ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _sheetLabel(String text) => Text(
+        text,
+        style: const TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+            color: AppTheme.textSecondary),
+      );
+
+  InputDecoration _fieldDecor(String hint) => InputDecoration(
+        hintText: hint,
+        hintStyle:
+            const TextStyle(fontSize: 13, color: AppTheme.textSecondary),
+        isDense: true,
+        contentPadding:
+            const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(10),
+          borderSide: BorderSide(color: Colors.grey.shade300),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(10),
+          borderSide: BorderSide(color: Colors.grey.shade300),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(10),
+          borderSide: const BorderSide(color: AppTheme.primary),
+        ),
+      );
+}
+
+// ── Reusable info / warning banner ────────────────────────────────────────────
+
+class _InfoBanner extends StatelessWidget {
+  final IconData icon;
+  final Color color;
+  final String message;
+  final double topPadding;
+
+  const _InfoBanner({
+    required this.icon,
+    required this.color,
+    required this.message,
+    this.topPadding = 0,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.only(bottom: 10, top: topPadding),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, size: 14, color: color),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Text(
+              message,
+              style: TextStyle(fontSize: 12, color: color),
+            ),
+          ),
+        ],
       ),
     );
   }

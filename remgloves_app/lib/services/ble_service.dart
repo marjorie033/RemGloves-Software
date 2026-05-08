@@ -1,18 +1,27 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io' show Platform;
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
+import '../models/calibration_data.dart';
 
-// ── Data model ───────────────────────────────────────────────────────────────
+// ── Data models ───────────────────────────────────────────────────────────────
 
 class GloveData {
-  /// Finger bend values — 0.0 (straight) to 1.0 (fully bent).
+  /// Discrete bend state per finger — 0.0 (straight) or 1.0 (bent).
   final Map<String, double> fingers;
 
-  /// 5-bit gesture byte from the ESP32.  bit0=Thumb … bit4=Pinky.
+  /// Raw bend percentage 0–100 per finger, as measured by the ESP32.
+  final Map<String, int> percentages;
+
+  /// 5-bit gesture code from the ESP32.  bit0=Thumb … bit4=Pinky.
   final int gestureCode;
 
-  const GloveData({required this.fingers, required this.gestureCode});
+  const GloveData({
+    required this.fingers,
+    required this.percentages,
+    required this.gestureCode,
+  });
 
   /// Binary string MSB→LSB: Pinky Ring Middle Index Thumb  (e.g. "11010")
   String get gestureBinary =>
@@ -21,31 +30,43 @@ class GloveData {
 
 enum BleStatus { idle, scanning, connecting, connected, disconnected, error }
 
-// ── BLE service ──────────────────────────────────────────────────────────────
+// ── BLE service ───────────────────────────────────────────────────────────────
 
 class BleService {
-  // ── Match your ESP32 exactly ───────────────────────────────────────────
-  // BLEDevice::init("RemGloves")  →  deviceName must match
+  // ── Nordic UART Service UUIDs ────────────────────────────────────────────
   static const String deviceName = 'RemGloves';
+  static const String _svcUuid  = '6E400001-B5A3-F393-E0A9-E50E24DCCA9E';
+  static const String _txUuid   = '6E400003-B5A3-F393-E0A9-E50E24DCCA9E'; // notify
+  static const String _rxUuid   = '6E400002-B5A3-F393-E0A9-E50E24DCCA9E'; // write
 
-  // Nordic UART Service UUIDs (same as in ESP32 sketch)
-  static const String _svcUuid = '6E400001-B5A3-F393-E0A9-E50E24DCCA9E';
-  static const String _txUuid  = '6E400003-B5A3-F393-E0A9-E50E24DCCA9E'; // notify
-
-  // ── Streams ───────────────────────────────────────────────────────────────
+  // ── Streams ──────────────────────────────────────────────────────────────
   final _dataCtrl   = StreamController<GloveData>.broadcast();
   final _statusCtrl = StreamController<BleStatus>.broadcast();
+  final _calCtrl    = StreamController<CalibrationData>.broadcast();
+  final _wifiCtrl   = StreamController<String>.broadcast();
+  final _logCtrl    = StreamController<String>.broadcast();
 
-  Stream<GloveData>  get dataStream   => _dataCtrl.stream;
-  Stream<BleStatus>  get statusStream => _statusCtrl.stream;
+  Stream<GloveData>       get dataStream        => _dataCtrl.stream;
+  Stream<BleStatus>       get statusStream      => _statusCtrl.stream;
+
+  /// Fires whenever the glove sends a CAL: packet — after calibration
+  /// completes or after a LOAD command is acknowledged.
+  Stream<CalibrationData> get calibrationStream => _calCtrl.stream;
+
+  /// Fires "OK" or "FAIL" when the glove replies to a WIFI: command.
+  Stream<String>          get wifiStream        => _wifiCtrl.stream;
+
+  /// Fires each LOG: message (prefix stripped) as the glove emits it.
+  Stream<String>          get logStream         => _logCtrl.stream;
 
   BleStatus _status = BleStatus.idle;
   BleStatus get status => _status;
 
-  BluetoothDevice?    _device;
-  StreamSubscription? _scanSub;
-  StreamSubscription? _charSub;
-  StreamSubscription? _connSub;
+  BluetoothDevice?         _device;
+  BluetoothCharacteristic? _rxChar;
+  StreamSubscription?      _scanSub;
+  StreamSubscription?      _charSub;
+  StreamSubscription?      _connSub;
 
   // ── Public API ────────────────────────────────────────────────────────────
 
@@ -53,8 +74,8 @@ class BleService {
     if (kIsWeb || !Platform.isAndroid && !Platform.isIOS) return;
 
     _emit(BleStatus.scanning);
-
     _scanSub?.cancel();
+
     _scanSub = FlutterBluePlus.scanResults.listen((results) {
       for (final r in results) {
         if (r.device.platformName == deviceName) {
@@ -72,7 +93,6 @@ class BleService {
       return;
     }
 
-    // Scan timed out without finding the device
     if (_status == BleStatus.scanning) _emit(BleStatus.disconnected);
   }
 
@@ -81,7 +101,8 @@ class BleService {
     _charSub?.cancel();
     _connSub?.cancel();
     _device?.disconnect();
-    _device = null;
+    _device  = null;
+    _rxChar  = null;
     _emit(BleStatus.idle);
   }
 
@@ -89,7 +110,24 @@ class BleService {
     disconnect();
     _dataCtrl.close();
     _statusCtrl.close();
+    _calCtrl.close();
+    _wifiCtrl.close();
+    _logCtrl.close();
   }
+
+  /// Sends "CAL" to the glove, triggering the 3-phase physical calibration.
+  /// Listen to [calibrationStream] for the resulting CAL: confirmation.
+  Future<void> startCalibration() => _write('CAL');
+
+  /// Sends "LOAD:<20 values>" to the glove, restoring a saved profile.
+  /// The glove echoes a CAL: packet on success — listen to [calibrationStream].
+  Future<void> loadProfile(CalibrationData data) =>
+      _write(data.toLoadCommand());
+
+  /// Sends `WIFI:<ssid>|<password>` to the glove.
+  /// Listen to [wifiStream] for "OK" or "FAIL".
+  Future<void> sendWifiCredentials(String ssid, String password) =>
+      _write('WIFI:$ssid|$password');
 
   // ── Internal ──────────────────────────────────────────────────────────────
 
@@ -98,74 +136,122 @@ class BleService {
     if (!_statusCtrl.isClosed) _statusCtrl.add(s);
   }
 
+  Future<void> _write(String command) async {
+    final rx = _rxChar;
+    if (rx == null) return;
+    await rx.write(utf8.encode(command), withoutResponse: false);
+  }
+
   Future<void> _connectDevice(BluetoothDevice device) async {
     _device = device;
     _emit(BleStatus.connecting);
 
     try {
       await device.connect(timeout: const Duration(seconds: 10));
+
+      // Request a large MTU so LOAD: commands and CAL: replies fit in one frame.
+      // Best-effort — proceed even if the peripheral refuses.
+      try {
+        await device.requestMtu(512);
+      } catch (_) {}
+
       _emit(BleStatus.connected);
 
       _connSub = device.connectionState.listen((state) {
         if (state == BluetoothConnectionState.disconnected) {
           _charSub?.cancel();
+          _rxChar = null;
           _emit(BleStatus.disconnected);
         }
       });
 
       final services = await device.discoverServices();
       for (final svc in services) {
-        if (_matchUuid(svc.uuid, _svcUuid)) {
-          for (final char in svc.characteristics) {
-            if (_matchUuid(char.uuid, _txUuid)) {
-              await char.setNotifyValue(true);
-              _charSub = char.onValueReceived.listen((bytes) {
-                final data = _parse(String.fromCharCodes(bytes).trim());
-                if (data != null && !_dataCtrl.isClosed) _dataCtrl.add(data);
-              });
-              return;
-            }
+        if (!_matchUuid(svc.uuid, _svcUuid)) continue;
+
+        for (final char in svc.characteristics) {
+          if (_matchUuid(char.uuid, _txUuid)) {
+            await char.setNotifyValue(true);
+            _charSub = char.onValueReceived.listen(
+              (bytes) => _handlePacket(utf8.decode(bytes).trim()),
+            );
+          }
+          if (_matchUuid(char.uuid, _rxUuid)) {
+            _rxChar = char;
           }
         }
+        break; // found our service — no need to scan further
       }
     } catch (_) {
       _emit(BleStatus.error);
     }
   }
 
-  bool _matchUuid(Guid uuid, String target) =>
-      uuid.toString().toUpperCase() == target.toUpperCase();
+  // ── Packet dispatcher ─────────────────────────────────────────────────────
 
-  // ── Parser ────────────────────────────────────────────────────────────────
-  // ESP32 packet (11 comma-separated integers, no spaces):
-  //   pct[0],bent[0],pct[1],bent[1],pct[2],bent[2],pct[3],bent[3],pct[4],bent[4],code
-  //   ─────── Thumb ────── ─────── Index ────── ─────── Middle ──────
-  //   ─────── Ring  ────── ─────── Pinky ────── gestureCode
-  //
-  // pct  : 0–100 (bend percentage)
-  // bent : 0=straight, 1=bent (debounced flag)
-  // code : 5-bit byte, bit0=Thumb … bit4=Pinky
+  void _handlePacket(String raw) {
+    if (raw.startsWith('CAL:')) {
+      final cal = _parseCalibration(raw.substring(4));
+      if (cal != null && !_calCtrl.isClosed) _calCtrl.add(cal);
+    } else if (raw.startsWith('WIFI:')) {
+      final result = raw.substring(5); // "OK" or "FAIL"
+      if (!_wifiCtrl.isClosed) _wifiCtrl.add(result);
+    } else if (raw.startsWith('LOG:')) {
+      final msg = raw.substring(4);
+      if (!_logCtrl.isClosed) _logCtrl.add(msg);
+    } else {
+      final data = _parseSensor(raw);
+      if (data != null && !_dataCtrl.isClosed) _dataCtrl.add(data);
+    }
+  }
 
-  static const _names = ['thumb', 'index', 'middle', 'ring', 'pinky'];
+  // ── CAL: parser ───────────────────────────────────────────────────────────
+  // Payload: 20 comma-separated ints
+  //   calMin×5, calMax×5, bentThresh×5, strtThresh×5
 
-  GloveData? _parse(String raw) {
+  CalibrationData? _parseCalibration(String payload) {
     try {
-      final parts = raw.split(',');
-      if (parts.length < 11) return null;
-
-      final fingers = <String, double>{};
-      for (int i = 0; i < 5; i++) {
-        // Use the debounced bent flag (parts[i*2+1]) — 0=straight, 1=bent.
-        // Ignore the raw pct value; we want discrete 0/1 behaviour only.
-        final bent = int.tryParse(parts[i * 2 + 1].trim());
-        if (bent == null) return null;
-        fingers[_names[i]] = bent == 0 ? 0.0 : 1.0;
-      }
-
-      final code = int.tryParse(parts[10].trim()) ?? 0;
-      return GloveData(fingers: fingers, gestureCode: code);
+      final values =
+          payload.split(',').map((s) => int.parse(s.trim())).toList();
+      if (values.length != 20) return null;
+      return CalibrationData.fromList(values);
     } catch (_) {
       return null;
     }
   }
+
+  // ── Sensor packet parser ──────────────────────────────────────────────────
+  // Format: T%,T_bent,I%,I_bent,M%,M_bent,R%,R_bent,P%,P_bent,code
+  //   %    : 0–100 bend percentage
+  //   _bent: 0=straight, 1=bent (debounced)
+  //   code : 5-bit gesture (bit0=Thumb … bit4=Pinky)
+
+  static const _names = ['thumb', 'index', 'middle', 'ring', 'pinky'];
+
+  GloveData? _parseSensor(String raw) {
+    try {
+      final parts = raw.split(',');
+      if (parts.length < 11) return null;
+
+      final fingers     = <String, double>{};
+      final percentages = <String, int>{};
+
+      for (int i = 0; i < 5; i++) {
+        final pct  = int.tryParse(parts[i * 2].trim());
+        final bent = int.tryParse(parts[i * 2 + 1].trim());
+        if (pct == null || bent == null) return null;
+        fingers[_names[i]]     = bent == 0 ? 0.0 : 1.0;
+        percentages[_names[i]] = pct.clamp(0, 100);
+      }
+
+      final code = int.tryParse(parts[10].trim()) ?? 0;
+      return GloveData(
+          fingers: fingers, percentages: percentages, gestureCode: code);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  bool _matchUuid(Guid uuid, String target) =>
+      uuid.toString().toUpperCase() == target.toUpperCase();
 }
