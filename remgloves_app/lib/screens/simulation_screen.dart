@@ -90,12 +90,29 @@ class _SimulationScreenState extends State<SimulationScreen> {
       final binBytes = await rootBundle.load('lib/assets/3dhand/scene.bin');
 
       final gltfMap = json.decode(gltfStr) as Map<String, dynamic>;
+
+      // Embed the binary buffer.
       final binB64 = base64.encode(binBytes.buffer.asUint8List());
       (gltfMap['buffers'] as List)[0]['uri'] =
           'data:application/octet-stream;base64,$binB64';
 
-      const basePath =
-          'file:///android_asset/flutter_assets/lib/assets/3dhand/';
+      // Embed every texture image so the WebView doesn't need to resolve
+      // relative file paths (which fail when GLTF is injected as a string).
+      final images = gltfMap['images'] as List?;
+      if (images != null) {
+        for (int i = 0; i < images.length; i++) {
+          final img = Map<String, dynamic>.from(images[i] as Map);
+          final uri = img['uri'] as String?;
+          if (uri != null && !uri.startsWith('data:')) {
+            final bytes =
+                await rootBundle.load('lib/assets/3dhand/$uri');
+            final b64 = base64.encode(bytes.buffer.asUint8List());
+            img['uri'] = 'data:${_mimeType(uri)};base64,$b64';
+            images[i] = img;
+          }
+        }
+      }
+
       final fullJson = json.encode(gltfMap);
       const chunkSize = 50000;
 
@@ -104,10 +121,18 @@ class _SimulationScreenState extends State<SimulationScreen> {
         await ctrl.runJavaScript(
             '_addGLTFChunk(${json.encode(fullJson.substring(i, end))})');
       }
-      await ctrl.runJavaScript('_parseGLTF("$basePath")');
+      await ctrl.runJavaScript('_parseGLTF("")');
     } catch (e) {
       debugPrint('GLTF injection error: $e');
     }
+  }
+
+  String _mimeType(String uri) {
+    final ext = uri.split('.').last.toLowerCase();
+    if (ext == 'jpg' || ext == 'jpeg') return 'image/jpeg';
+    if (ext == 'png') return 'image/png';
+    if (ext == 'webp') return 'image/webp';
+    return 'image/png';
   }
 
   // ── Finger → WebView ──────────────────────────────────────────────────────
