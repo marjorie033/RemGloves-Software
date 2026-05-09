@@ -62,6 +62,10 @@ class BleService {
   BleStatus _status = BleStatus.idle;
   BleStatus get status => _status;
 
+  DateTime? _connectedAt;
+  DateTime? get connectedAt => _connectedAt;
+  String?   get connectedDeviceId => _device?.remoteId.str;
+
   BluetoothDevice?         _device;
   BluetoothCharacteristic? _rxChar;
   StreamSubscription?      _scanSub;
@@ -133,6 +137,8 @@ class BleService {
 
   void _emit(BleStatus s) {
     _status = s;
+    if (s == BleStatus.connected) _connectedAt = DateTime.now();
+    if (s == BleStatus.disconnected || s == BleStatus.idle) _connectedAt = null;
     if (!_statusCtrl.isClosed) _statusCtrl.add(s);
   }
 

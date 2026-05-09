@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:iconify_flutter/iconify_flutter.dart';
@@ -126,11 +125,6 @@ class LogsScreen extends StatefulWidget {
 }
 
 class _LogsScreenState extends State<LogsScreen> {
-  // Live feed (last 100)
-  StreamSubscription<DatabaseEvent>? _sub;
-  List<_RtdbLog> _logs = [];
-  bool _logsLoading = true;
-
   // Analytics
   _Range _selectedRange = _Range.week;
   final Map<_Range, _SummaryCache> _cache = {};
@@ -138,58 +132,22 @@ class _LogsScreenState extends State<LogsScreen> {
   String? _summaryError;
   final Set<_Range> _upToDateRanges = {};
 
+  List<_RtdbLog> _rangeHistoryLogs = [];
+  int _historyDisplayCount = 20;
+  static const int _historyPageSize = 20;
+
   _SummaryCache? get _currentCache => _cache[_selectedRange];
   bool get _isUpToDate => _upToDateRanges.contains(_selectedRange);
 
   @override
   void initState() {
     super.initState();
-    _startLiveFeed();
     _autoLoadIfNeeded();
   }
 
   @override
   void dispose() {
-    _sub?.cancel();
     super.dispose();
-  }
-
-  // ── Live feed (real-time, last 100) ────────────────────────────────────────
-
-  void _startLiveFeed() {
-    final ref = FirebaseDatabase.instance.ref('gestures');
-    _sub = ref.orderByChild('t').limitToLast(100).onValue.listen((event) {
-      final raw = event.snapshot.value;
-      final parsed = <_RtdbLog>[];
-      if (raw is Map) {
-        raw.forEach((key, val) {
-          if (val is Map) {
-            final cmd = val['cmd'] as String? ?? '';
-            parsed.add(_RtdbLog(
-              message: cmd,
-              timestamp: val['t'] as int? ?? 0,
-              device: _inferDevice(cmd),
-              calMin: _parseIntList(val['calMin']),
-              calMax: _parseIntList(val['calMax']),
-            ));
-          }
-        });
-        parsed.sort((a, b) => b.timestamp.compareTo(a.timestamp));
-      }
-      if (mounted) {
-        setState(() {
-          _logs = parsed;
-          _logsLoading = false;
-        });
-      }
-    }, onError: (e) {
-      if (mounted) {
-        setState(() => _logsLoading = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('RTDB error: $e')),
-        );
-      }
-    });
   }
 
   // ── Analytics ─────────────────────────────────────────────────────────────
@@ -225,6 +183,7 @@ class _LogsScreenState extends State<LogsScreen> {
       final raw = snapshot.value;
       final deviceCounts = <String, int>{};
       final commandCounts = <String, int>{};
+      final logsList = <_RtdbLog>[];
       int total = 0;
       int calibrations = 0;
 
@@ -239,8 +198,16 @@ class _LogsScreenState extends State<LogsScreen> {
               commandCounts[cmd] = (commandCounts[cmd] ?? 0) + 1;
             }
             if (val['calMin'] != null) calibrations++;
+            logsList.add(_RtdbLog(
+              message: cmd,
+              timestamp: val['t'] as int? ?? 0,
+              device: device,
+              calMin: _parseIntList(val['calMin']),
+              calMax: _parseIntList(val['calMax']),
+            ));
           }
         });
+        logsList.sort((a, b) => b.timestamp.compareTo(a.timestamp));
       }
 
       if (!mounted) return;
@@ -252,6 +219,7 @@ class _LogsScreenState extends State<LogsScreen> {
           setState(() {
             _summaryLoading = false;
             _upToDateRanges.add(_selectedRange);
+            _rangeHistoryLogs = logsList;
           });
           return;
         }
@@ -268,6 +236,7 @@ class _LogsScreenState extends State<LogsScreen> {
           );
           _upToDateRanges.remove(_selectedRange);
           _summaryLoading = false;
+          _rangeHistoryLogs = logsList;
         });
         return;
       }
@@ -292,6 +261,7 @@ class _LogsScreenState extends State<LogsScreen> {
           );
           _upToDateRanges.remove(_selectedRange);
           _summaryLoading = false;
+          _rangeHistoryLogs = logsList;
         });
       }
     } catch (e) {
@@ -418,7 +388,11 @@ class _LogsScreenState extends State<LogsScreen> {
           child: GestureDetector(
             onTap: () {
               if (!selected) {
-                setState(() => _selectedRange = range);
+                setState(() {
+                  _selectedRange = range;
+                  _historyDisplayCount = _historyPageSize;
+                });
+                _autoLoadIfNeeded();
               }
             },
             child: AnimatedContainer(
@@ -664,7 +638,7 @@ class _LogsScreenState extends State<LogsScreen> {
   }
 
   SliverList _buildLogsList() {
-    if (_logsLoading) {
+    if (_summaryLoading && _rangeHistoryLogs.isEmpty) {
       return SliverList(
         delegate: SliverChildListDelegate([
           const Padding(
@@ -677,7 +651,7 @@ class _LogsScreenState extends State<LogsScreen> {
       );
     }
 
-    if (_logs.isEmpty) {
+    if (_rangeHistoryLogs.isEmpty) {
       return SliverList(
         delegate: SliverChildListDelegate([
           Padding(
@@ -703,13 +677,45 @@ class _LogsScreenState extends State<LogsScreen> {
       );
     }
 
+    final displayed = _rangeHistoryLogs.take(_historyDisplayCount).toList();
+    final hasMore = _rangeHistoryLogs.length > _historyDisplayCount;
+
     return SliverList(
       delegate: SliverChildBuilderDelegate(
         (context, index) {
-          if (index == _logs.length) {
+          if (index == displayed.length) {
+            if (hasMore) {
+              return Padding(
+                padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
+                child: GestureDetector(
+                  onTap: () => setState(
+                    () => _historyDisplayCount += _historyPageSize,
+                  ),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(
+                          color: const Color(0xFF483912), width: 1),
+                    ),
+                    child: const Center(
+                      child: Text(
+                        'Show more',
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: AppTheme.primary,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              );
+            }
             return const SizedBox(height: 16);
           }
-          final log = _logs[index];
+          final log = displayed[index];
           return Padding(
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
             child: _LogTile(
@@ -718,7 +724,7 @@ class _LogsScreenState extends State<LogsScreen> {
             ),
           );
         },
-        childCount: _logs.length + 1,
+        childCount: displayed.length + 1,
       ),
     );
   }

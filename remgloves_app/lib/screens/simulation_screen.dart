@@ -1,7 +1,8 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io' show Platform;
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/foundation.dart' show Factory, kIsWeb;
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:webview_flutter/webview_flutter.dart';
@@ -198,7 +199,17 @@ class _SimulationScreenState extends State<SimulationScreen> {
       clipBehavior: Clip.antiAlias,
       child: _webViewSupported && _webViewController != null
           ? Stack(children: [
-              WebViewWidget(controller: _webViewController!),
+              WebViewWidget(
+                controller: _webViewController!,
+                gestureRecognizers: {
+                  Factory<VerticalDragGestureRecognizer>(
+                      () => VerticalDragGestureRecognizer()),
+                  Factory<HorizontalDragGestureRecognizer>(
+                      () => HorizontalDragGestureRecognizer()),
+                  Factory<ScaleGestureRecognizer>(
+                      () => ScaleGestureRecognizer()),
+                },
+              ),
               if (!_modelReady)
                 Container(
                   color: const Color(0xFF1A1A2E),

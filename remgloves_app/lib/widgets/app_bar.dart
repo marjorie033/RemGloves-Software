@@ -20,20 +20,43 @@ class RemGloveAppBar extends StatefulWidget implements PreferredSizeWidget {
 class _RemGloveAppBarState extends State<RemGloveAppBar> {
   late BleStatus _status;
   StreamSubscription<BleStatus>? _sub;
+  Timer? _ticker;
 
   @override
   void initState() {
     super.initState();
     _status = widget.ble.status;
     _sub = widget.ble.statusStream.listen((s) {
-      if (mounted) setState(() => _status = s);
+      if (!mounted) return;
+      setState(() => _status = s);
+      if (s == BleStatus.connected) {
+        _ticker = Timer.periodic(const Duration(seconds: 1), (_) {
+          if (mounted) setState(() {});
+        });
+      } else {
+        _ticker?.cancel();
+        _ticker = null;
+      }
     });
+    if (_status == BleStatus.connected) {
+      _ticker = Timer.periodic(const Duration(seconds: 1), (_) {
+        if (mounted) setState(() {});
+      });
+    }
   }
 
   @override
   void dispose() {
     _sub?.cancel();
+    _ticker?.cancel();
     super.dispose();
+  }
+
+  String _formatDuration(Duration d) {
+    final h = d.inHours;
+    final m = d.inMinutes.remainder(60).toString().padLeft(2, '0');
+    final s = d.inSeconds.remainder(60).toString().padLeft(2, '0');
+    return h > 0 ? '$h:$m:$s' : '$m:$s';
   }
 
   void _onIndicatorTap() {
@@ -130,7 +153,7 @@ class _RemGloveAppBarState extends State<RemGloveAppBar> {
               ),
             ),
 
-            // ── Battery row ──────────────────────────────────────────────────
+            // ── Device info row ───────────────────────────────────────────────
             Container(
               margin: const EdgeInsets.symmetric(horizontal: 16),
               padding:
@@ -144,20 +167,27 @@ class _RemGloveAppBarState extends State<RemGloveAppBar> {
                   const Icon(Icons.bluetooth,
                       color: AppTheme.textPrimary, size: 16),
                   const SizedBox(width: 8),
-                  const Text(
-                    'Glove Battery',
-                    style: TextStyle(
-                        color: AppTheme.textPrimary,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w500),
+                  Expanded(
+                    child: Text(
+                      widget.ble.connectedDeviceId ?? '—',
+                      style: const TextStyle(
+                          color: AppTheme.textPrimary,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w500),
+                      overflow: TextOverflow.ellipsis,
+                    ),
                   ),
-                  const Spacer(),
-                  const Text(
-                    '95%',
-                    style: TextStyle(
+                  const SizedBox(width: 8),
+                  Text(
+                    widget.ble.connectedAt != null
+                        ? _formatDuration(
+                            DateTime.now().difference(widget.ble.connectedAt!))
+                        : '—',
+                    style: const TextStyle(
                       color: AppTheme.textPrimary,
                       fontSize: 11,
                       fontWeight: FontWeight.w700,
+                      fontFeatures: [FontFeature.tabularFigures()],
                     ),
                   ),
                 ],
