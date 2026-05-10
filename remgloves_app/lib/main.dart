@@ -36,7 +36,7 @@ class RemGloveApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'RemGlove',
+      title: 'RemGloves',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.lightTheme,
       home: const MainShell(),

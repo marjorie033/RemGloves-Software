@@ -31,14 +31,11 @@ class AiSummaryService {
       'contents': [
         {
           'parts': [
-            {'text': prompt}
-          ]
-        }
+            {'text': prompt},
+          ],
+        },
       ],
-      'generationConfig': {
-        'temperature': 0.4,
-        'maxOutputTokens': 300,
-      },
+      'generationConfig': {'temperature': 0.4, 'maxOutputTokens': 300},
     });
 
     for (int attempt = 0; attempt < 2; attempt++) {
@@ -54,12 +51,14 @@ class AiSummaryService {
       }
 
       if (response.statusCode != 200) {
-        throw Exception('Gemini error ${response.statusCode}: ${response.body}');
+        throw Exception(
+          'Gemini error ${response.statusCode}: ${response.body}',
+        );
       }
 
       final json = jsonDecode(response.body) as Map<String, dynamic>;
-      final text = json['candidates']?[0]?['content']?['parts']?[0]?['text']
-          as String?;
+      final text =
+          json['candidates']?[0]?['content']?['parts']?[0]?['text'] as String?;
       return text?.trim() ?? 'No summary available.';
     }
 
@@ -71,11 +70,12 @@ class AiSummaryService {
         .map((e) => '  - ${e.key}: ${e.value} gestures')
         .join('\n');
 
-    final topCommands = (input.commandCounts.entries.toList()
-          ..sort((a, b) => b.value.compareTo(a.value)))
-        .take(5)
-        .map((e) => '  - "${e.key}": ${e.value}x')
-        .join('\n');
+    final topCommands =
+        (input.commandCounts.entries.toList()
+              ..sort((a, b) => b.value.compareTo(a.value)))
+            .take(5)
+            .map((e) => '  - "${e.key}": ${e.value}x')
+            .join('\n');
 
     return '''
 You are an analytics assistant for a smart glove app called RemGloves that controls home devices via hand gestures.
@@ -96,8 +96,18 @@ Write the summary now:''';
 
   static String _fmt(DateTime dt) {
     const months = [
-      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
     ];
     return '${months[dt.month - 1]} ${dt.day}, ${dt.year}';
   }

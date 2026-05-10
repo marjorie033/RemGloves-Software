@@ -19,7 +19,7 @@
     <!-- ── Bluetooth permissions ──────────────────────────────────── -->
 
     <application
-        android:label="remgloves_app"
+        android:label="RemGloves"
         android:name="${applicationName}"
         android:icon="@mipmap/launcher_icon">
         <activity
