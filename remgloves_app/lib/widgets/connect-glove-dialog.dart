@@ -125,8 +125,12 @@ class _ConnectGloveDialogState extends State<_ConnectGloveDialog>
   @override
   void dispose() {
     _bleSub?.cancel();
-    for (final c in _ringCtls) c.dispose();
-    for (final c in _dotCtls) c.dispose();
+    for (final c in _ringCtls) {
+      c.dispose();
+    }
+    for (final c in _dotCtls) {
+      c.dispose();
+    }
     super.dispose();
   }
 
@@ -150,7 +154,9 @@ class _ConnectGloveDialogState extends State<_ConnectGloveDialog>
   }
 
   void _pauseRings() {
-    for (final c in _ringCtls) c.stop();
+    for (final c in _ringCtls) {
+      c.stop();
+    }
   }
 
   void _resumeRings() {
@@ -297,7 +303,7 @@ class _ConnectGloveDialogState extends State<_ConnectGloveDialog>
                     final sizes = [ringSize, ringMid, ringInner];
                     return AnimatedBuilder(
                       animation: _ringCtls[i],
-                      builder: (_, __) => Opacity(
+                      builder: (_, _) => Opacity(
                         opacity: _ringOpacities[i].value,
                         child: Transform.scale(
                           scale: _ringScales[i].value,
@@ -373,7 +379,7 @@ class _ConnectGloveDialogState extends State<_ConnectGloveDialog>
                         3,
                         (i) => AnimatedBuilder(
                           animation: _dotCtls[i],
-                          builder: (_, __) => Transform.translate(
+                          builder: (_, _) => Transform.translate(
                             offset: Offset(0, _dotOffsets[i].value),
                             child: Container(
                               width: 3.5,
