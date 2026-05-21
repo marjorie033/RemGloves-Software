@@ -12,7 +12,24 @@
       "Bash(Select-Object -Skip 1)",
       "Bash(Sort-Object)",
       "Bash(xargs wc -l)",
-      "Bash(flutter pub *)"
+      "Bash(flutter pub *)",
+      "Bash(flutter analyze *)",
+      "Bash(git checkout *)",
+      "Bash(magick --version)",
+      "Bash(inkscape --version)",
+      "Bash(npm list *)",
+      "Bash(pip list *)",
+      "Bash(dart run *)",
+      "Bash(pip install *)",
+      "Bash(python -c \"import cairosvg; cairosvg.svg2png\\(url='assets/icon.svg', write_to='assets/icon.png', output_width=1024, output_height=1024\\)\")",
+      "Bash(cd /tmp/icon_convert && npm list 2>&1)",
+      "Read(//tmp/**)",
+      "Bash(node -e ' *)",
+      "Bash(git pull *)",
+      "Bash(git stash *)",
+      "Bash(git rebase *)",
+      "Bash(git fetch *)",
+      "Bash(git merge *)"
     ]
   }
 }
